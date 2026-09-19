@@ -83,6 +83,16 @@ parted_sample='BYT;
 assert_eq "$(printf '%s\n' "$parted_sample" | parse_largest_free_region)" '107375230976 536869863423 429494632448'
 # shellcheck source=../lib/validation.sh
 source "$ROOT/lib/validation.sh"
+report 'Counter test' FAIL >/dev/null
+report 'Counter warning' WARN >/dev/null
+report 'Counter untested' 'NOT TESTED' >/dev/null
+assert_eq "$VALIDATION_FAILURES" 1
+assert_eq "$VALIDATION_WARNINGS" 1
+assert_eq "$VALIDATION_NOT_TESTED" 1
+assert_ok grep -q 'name: address' "$ROOT/templates/kube-vip/kube-vip.yaml"
+assert_ok grep -q 'name: vip_subnet' "$ROOT/templates/kube-vip/kube-vip.yaml"
+assert_bad grep -q 'name: vip_cidr' "$ROOT/templates/kube-vip/kube-vip.yaml"
+assert_bad grep -q 'name: vip_address' "$ROOT/templates/kube-vip/kube-vip.yaml"
 k3s_local_installation_present(){ return 1; }
 fresh_report=$(validate_cluster)
 assert_ok grep -Eq '^K3s service[[:space:]]+MISSING' <<<"$fresh_report"

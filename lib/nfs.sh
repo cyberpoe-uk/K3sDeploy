@@ -62,7 +62,7 @@ render_nfs_storageclass(){ sed -e "s#__NFS_SERVER__#$NFS_SERVER#g" -e "s#__NFS_E
 
 validate_nfs(){
   if ! kubectl_local get csidriver nfs.csi.k8s.io >/dev/null 2>&1; then
-    report 'NFS CSI driver' MISSING 'nfs.csi.k8s.io is not registered'
+    report 'NFS CSI driver' FAIL 'nfs.csi.k8s.io is not registered'
     return 1
   fi
   if kubectl_local get storageclass nfs-csi-retain >/dev/null 2>&1; then

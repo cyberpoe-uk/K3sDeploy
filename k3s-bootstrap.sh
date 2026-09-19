@@ -542,6 +542,8 @@ run_menu_action(){
   if ((rc != 0)); then
     warn "This workflow stopped safely (exit $rc). No later phases were run."
     info 'Review the message above, correct the input or system condition, then choose an installer option again.'
+  elif [[ $action =~ ^[56]$ ]]; then
+    info 'Inspection workflow finished. Review the health result above before choosing the next action.'
   else
     ok 'Workflow finished. Returning to the installer menu.'
   fi

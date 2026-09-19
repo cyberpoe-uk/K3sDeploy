@@ -35,6 +35,16 @@ install_metallb(){
 }
 
 validate_metallb(){
-  if kubectl_local -n metallb-system get deploy controller >/dev/null 2>&1; then ok 'MetalLB controller exists'; else warn 'MetalLB controller missing'; fi
-  if kubectl_local -n metallb-system get ds speaker >/dev/null 2>&1; then ok 'MetalLB speaker exists'; else warn 'MetalLB speaker missing'; fi
+  local controller speaker_desired speaker_ready
+  controller=$(kubectl_local -n metallb-system get deploy controller -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)
+  speaker_desired=$(kubectl_local -n metallb-system get ds speaker -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || true)
+  speaker_ready=$(kubectl_local -n metallb-system get ds speaker -o jsonpath='{.status.numberReady}' 2>/dev/null || true)
+  if [[ $controller =~ ^[1-9][0-9]*$ && $speaker_desired =~ ^[1-9][0-9]*$ && $speaker_desired == "$speaker_ready" ]] &&
+     kubectl_local -n metallb-system get ipaddresspool homelab-pool >/dev/null 2>&1 &&
+     kubectl_local -n metallb-system get l2advertisement homelab-l2 >/dev/null 2>&1; then
+    report MetalLB OK "controller available: $controller; speakers ready: $speaker_ready/$speaker_desired; address pool configured"
+  else
+    report MetalLB FAIL "controller available: ${controller:-0}; speakers ready: ${speaker_ready:-0}/${speaker_desired:-0}; verify address pool and advertisement"
+    return 1
+  fi
 }

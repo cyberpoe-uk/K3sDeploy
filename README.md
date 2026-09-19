@@ -320,11 +320,11 @@ Longhorn data is not intentionally removed, but verify healthy replicas and back
 
 ## Validation and safe repair
 
-Option 5 produces a read-only health report covering the OS, network, K3s service, Kubernetes API, node readiness and roles, API VIP, kube-vip, ServiceLB, MetalLB, Traefik, iSCSI, Longhorn, and the expected storage mount/UUID. Components intentionally omitted by the advanced profile are reported as `SKIP`. On a clean node, software that has never been installed is reported as `MISSING` or `SKIP` rather than failed.
+Option 5 produces a read-only health report covering the OS, network, K3s service, Kubernetes API, node readiness and roles, API VIP, kube-vip, ServiceLB, MetalLB, Traefik, iSCSI, Longhorn, and the expected storage mount/UUID. It finishes with a counted health result so failed checks cannot be mistaken for a successful workflow. Components intentionally omitted by the advanced profile are reported as `SKIP`. On a clean node, software that has never been installed is reported as `MISSING` or `SKIP` rather than failed.
 
 If a node created by an older K3sDeploy release still exposes the local-path provisioner while Longhorn, NFS, or external storage is selected, validation reports a warning instead of deleting or reconfiguring potentially used storage automatically.
 
-Option 6 offers only narrow repairs such as starting an existing stopped service, installing a required storage client, or continuing a saved MetalLB, Longhorn, or NFS CSI installation that stopped partway through. It asks before reconciling a missing add-on. On a clean node it explains that there is nothing to repair and points to installation options 1–3; it never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
+Option 6 offers only narrow repairs such as starting an existing stopped service, installing a required storage client, repairing the managed kube-vip DaemonSet, or continuing a saved MetalLB, Longhorn, or NFS CSI installation that stopped partway through. It asks before reconciling a missing add-on. Repair always runs the same health report as option 5 afterward and explains that a second manual validation run is unnecessary. When Longhorn is selected and no failed health checks remain, it offers an optional functional storage test. On a clean node it explains that there is nothing to repair and points to installation options 1–3; it never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
 
 ## Safety and idempotency
 
@@ -368,7 +368,7 @@ bash tests/test-functions.sh
 bash tests/test-interaction.sh
 ```
 
-The optional `tests/smoke-longhorn.sh` test creates a small PVC, writes a unique value, removes the writer pod, reattaches the claim, and verifies the same value. Run it only after the cluster is healthy. A retained PV may require deliberate administrative cleanup because the StorageClass reclaim policy is `Retain`.
+The optional Longhorn test creates an isolated namespace, a temporary `Delete` StorageClass, and a 128 MiB one-replica volume. It writes a unique value, removes the writer pod, reattaches the claim to a reader pod, verifies the same value, and removes the namespace and StorageClass. It tests provisioning and persistence without leaving the normal retained StorageClass's PV behind. It does not prove multi-node HA or replace backups. Run it from option 6 when offered, or explicitly with `bash tests/smoke-longhorn.sh` after the cluster is healthy.
 
 ## Known limitations
 

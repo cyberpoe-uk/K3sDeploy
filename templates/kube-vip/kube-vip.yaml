@@ -30,23 +30,39 @@ spec:
       serviceAccountName: kube-vip
       hostNetwork: true
       tolerations: [{operator: Exists}]
-      nodeSelector: {node-role.kubernetes.io/control-plane: "true"}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - {key: node-role.kubernetes.io/master, operator: Exists}
+            - matchExpressions:
+              - {key: node-role.kubernetes.io/control-plane, operator: Exists}
       containers:
       - name: kube-vip
         image: ghcr.io/kube-vip/kube-vip:__VERSION__
         args: [manager]
-        securityContext: {capabilities: {add: [NET_ADMIN, NET_RAW]}}
+        securityContext:
+          capabilities:
+            add: [NET_ADMIN, NET_RAW]
+            drop: [ALL]
         env:
         - {name: vip_arp, value: "true"}
         - {name: port, value: "6443"}
-        - {name: vip_cidr, value: "32"}
+        - name: vip_nodename
+          valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+        - {name: vip_subnet, value: "32"}
         - {name: cp_enable, value: "true"}
         - {name: cp_namespace, value: kube-system}
         - {name: svc_enable, value: "false"}
         - {name: vip_leaderelection, value: "true"}
-        - {name: vip_address, value: __VIP__}
-        - {name: vip_interface, value: ""}
+        - {name: address, value: __VIP__}
         - {name: vip_ddns, value: "false"}
         - {name: vip_leaseduration, value: "5"}
         - {name: vip_renewdeadline, value: "3"}
         - {name: vip_retryperiod, value: "1"}
+        volumeMounts:
+        - {name: proc-net, mountPath: /proc/sys/net}
+      volumes:
+      - name: proc-net
+        hostPath: {path: /proc/sys/net, type: Directory}

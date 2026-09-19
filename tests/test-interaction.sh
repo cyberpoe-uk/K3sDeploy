@@ -82,6 +82,7 @@ kubectl_local(){
     *) return 0;;
   esac
 }
+kube_vip_ready(){ return 0; }
 collect_metallb_pool(){ POOL_START=10.10.10.110; POOL_END=10.10.10.115; }
 METALLB_REPAIRS=0
 STATE_WRITES=0
@@ -96,6 +97,18 @@ repair_managed_addons <<< ''
 assert_eq "$METALLB_REPAIRS" 1
 assert_eq "$STATE_WRITES" 1
 assert_eq "$POOL_START-$POOL_END" 10.10.10.110-10.10.10.115
+
+SMOKE_LOG=$(mktemp -t k3sdeploy-smoke-test-XXXXXX)
+kubectl_local(){
+  printf 'ARGS %s\n' "$*" >>"$SMOKE_LOG"
+  if [[ $* == 'apply -f -' ]]; then cat >>"$SMOKE_LOG"; fi
+  return 0
+}
+assert_ok run_longhorn_smoke
+assert_ok grep -q '^reclaimPolicy: Delete$' "$SMOKE_LOG"
+assert_ok grep -q '^  numberOfReplicas: "1"$' "$SMOKE_LOG"
+assert_ok grep -q 'delete namespace k3sdeploy-smoke-' "$SMOKE_LOG"
+rm -f "$SMOKE_LOG"
 
 dispatch_action(){ return 23; }
 assert_ok run_menu_action 1

@@ -8,7 +8,30 @@ kubectl_local(){
   local -a auth=(--server "https://${API_VIP:-127.0.0.1}:6443" --certificate-authority "$agent_dir/server-ca.crt" --client-certificate "$agent_dir/client-kubelet.crt" --client-key "$agent_dir/client-kubelet.key")
   if [[ $EUID -eq 0 ]]; then k3s kubectl "${auth[@]}" "$@"; else sudo k3s kubectl "${auth[@]}" "$@"; fi
 }
-report(){ local label=$1 status=$2 detail=${3:-}; printf '%-31s %-10s %s\n' "$label" "$status" "$detail"; }
+VALIDATION_FAILURES=0
+VALIDATION_WARNINGS=0
+VALIDATION_NOT_TESTED=0
+report(){
+  local label=$1 status=$2 detail=${3:-}
+  case $status in
+    FAIL) VALIDATION_FAILURES=$((VALIDATION_FAILURES+1));;
+    WARN) VALIDATION_WARNINGS=$((VALIDATION_WARNINGS+1));;
+    'NOT TESTED') VALIDATION_NOT_TESTED=$((VALIDATION_NOT_TESTED+1));;
+  esac
+  printf '%-31s %-10s %s\n' "$label" "$status" "$detail"
+}
+validation_summary(){
+  printf '\n'
+  if ((VALIDATION_FAILURES > 0)); then
+    error "Health result: $VALIDATION_FAILURES failed check(s), $VALIDATION_WARNINGS warning(s), $VALIDATION_NOT_TESTED untested check(s)."
+    return 1
+  fi
+  if ((VALIDATION_WARNINGS > 0 || VALIDATION_NOT_TESTED > 0)); then
+    warn "Health result: no failed checks; $VALIDATION_WARNINGS warning(s) and $VALIDATION_NOT_TESTED untested check(s) need review."
+    return 0
+  fi
+  ok 'Health result: all applicable checks passed'
+}
 check(){ local label=$1; shift; if "$@" >/dev/null 2>&1; then report "$label" OK; else report "$label" FAIL; return 1; fi; }
 systemd_unit_exists(){ systemctl list-unit-files --no-legend "$1.service" 2>/dev/null | grep -q "^$1.service"; }
 k3s_local_installation_present(){
@@ -46,12 +69,16 @@ report_fresh_node(){
 }
 
 validate_cluster(){
+  VALIDATION_FAILURES=0
+  VALIDATION_WARNINGS=0
+  VALIDATION_NOT_TESTED=0
   printf '\nHealth report\n'
   if [[ -r /etc/os-release && ${OS_PACKAGE_MANAGER:-unsupported} != unsupported ]]; then report 'Operating system' OK "${OS_NAME:-Linux} ($OS_PACKAGE_MANAGER)"; else report 'Operating system' FAIL 'unsupported or not detected'; fi
   check Network ip route get 1.1.1.1 || true
   if ! k3s_local_installation_present; then
     report_fresh_node
     printf '\nThis is a clean node. Choose option 1 to create the first manager, option 2 to join a manager, or option 3 to join a worker.\n'
+    validation_summary || true
     return 0
   fi
   if systemctl is-active --quiet k3s || systemctl is-active --quiet k3s-agent; then
@@ -76,6 +103,11 @@ validate_cluster(){
       report 'K3s ServiceLB' FAIL 'running although another load-balancer mode was selected'
     fi
     validate_kube_vip || true
+    if [[ -n ${API_VIP:-} ]]; then
+      if port_reachable "$API_VIP" 6443; then report 'API VIP endpoint' OK "$API_VIP:6443 reachable"; else report 'API VIP endpoint' FAIL "$API_VIP:6443 is unreachable"; fi
+    else
+      report 'API VIP endpoint' FAIL 'saved API VIP is missing'
+    fi
     if [[ ${LOAD_BALANCER_MODE:-metallb} == metallb ]]; then validate_metallb || true; else report MetalLB SKIP "not selected ($LOAD_BALANCER_MODE mode)"; fi
     if [[ ${STORAGE_PROVIDER:-longhorn} == longhorn ]]; then validate_longhorn || true; else report Longhorn SKIP "$STORAGE_PROVIDER storage selected"; fi
     if [[ ${STORAGE_PROVIDER:-longhorn} != local-path ]]; then
@@ -105,6 +137,7 @@ validate_cluster(){
     validate_storage_selection || true
     report 'Persistent storage' 'NOT TESTED' 'run tests/smoke-longhorn.sh explicitly'
   fi
+  validation_summary || true
 }
 
 repair_managed_addons(){
@@ -112,6 +145,14 @@ repair_managed_addons(){
   if ! kubectl_local get --raw=/readyz >/dev/null 2>&1; then
     warn 'The Kubernetes API is not ready; cluster add-ons cannot be reconciled yet.'
     return 0
+  fi
+
+  if ! kube_vip_ready; then
+    warn "The kube-vip API virtual-address DaemonSet is not ready (${API_VIP:-VIP unknown})."
+    kubectl_local -n kube-system get pods -l app=kube-vip -o wide 2>/dev/null || true
+    if [[ -n ${API_VIP:-} ]] && confirm_yes 'Reapply the pinned kube-vip manifest and wait for it to become ready now?'; then
+      install_kube_vip
+    fi
   fi
 
   if [[ ${LOAD_BALANCER_MODE:-metallb} == metallb ]] && {
@@ -151,6 +192,35 @@ repair_managed_addons(){
     fi
   fi
 }
+verify_after_repair(){
+  validate_cluster
+  info 'The health report above is the same read-only inspection provided by menu option 5; you do not need to run it again now.'
+  if ((VALIDATION_FAILURES > 0)); then
+    warn 'Repair completed, but failed health checks remain. Resolve the reported failure before deploying workloads.'
+    return 0
+  fi
+  if [[ ${STORAGE_PROVIDER:-longhorn} == longhorn && ${NODE_ROLE:-server} != agent ]]; then
+    printf '\nOptional Longhorn functional test\n---------------------------------\n\n'
+    printf '%s\n' \
+      '  The health report checks configuration and component readiness.' \
+      '  This additional test temporarily provisions a volume, writes data,' \
+      '  reattaches it, verifies the data, and removes the test resources.'
+    if confirm 'Run the temporary Longhorn storage smoke test now?'; then
+      if run_longhorn_smoke; then
+        if ((VALIDATION_WARNINGS > 0)); then
+          warn 'The Longhorn functional test passed, but the health-report warning(s) above still need review.'
+        else
+          ok 'Post-repair health checks and Longhorn functional verification completed successfully'
+        fi
+      else
+        error 'Post-repair Longhorn functional verification failed'
+        return 1
+      fi
+    else
+      skip 'Longhorn functional smoke test was not requested; configuration checks only were completed'
+    fi
+  fi
+}
 safe_repair(){
   info "Repair mode only offers non-destructive actions"
   if ! k3s_local_installation_present; then
@@ -176,5 +246,5 @@ safe_repair(){
   fi
   repair_managed_addons
   [[ ! -f $CONFIG_FILE ]] || warn "Configuration reconciliation requires desired values and explicit confirmation; no automatic cluster-identity changes are made."
-  validate_cluster
+  verify_after_repair
 }

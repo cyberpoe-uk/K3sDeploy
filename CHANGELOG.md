@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Run a counted health summary automatically after safe repair, explain that it replaces a second option-5 run, and offer an optional self-cleaning Longhorn provisioning/persistence test.
+- Treat an unready kube-vip DaemonSet or unreachable API VIP as a failed health check, offer a pinned-manifest repair, wait for rollout readiness, and use current kube-vip address/subnet fields with control-plane label affinity.
+- Validate MetalLB controller, speaker, address-pool, and advertisement readiness instead of checking only that objects exist.
 - Wait for the MetalLB speaker and admission-webhook endpoint, then retry pool configuration during temporary webhook startup failures.
 - Correct the repeated MetalLB pool in the installation summary and persist pool details so safe repair can resume a partial first-manager installation.
 - Add guided shared NFS storage using the pinned Kubernetes NFS CSI driver, NFSv4.1 reachability/mount checks, and a retained dynamic StorageClass.
