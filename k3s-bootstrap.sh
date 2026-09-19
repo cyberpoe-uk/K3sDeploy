@@ -75,7 +75,10 @@ collect_new_cluster_vip(){
   same_subnet "$NODE_IP" "$API_VIP" 24 || warn 'VIP and node IP do not share a /24. Most kube-vip ARP networks require the same Layer-2 network.'
   ensure_arping || true
   if ! vip_conflict_check "$API_VIP" "$PRIMARY_IFACE"; then
-    confirm "Continue even though the automated check did not confirm that $API_VIP is unused?" || die 'Choose and reserve an unused VIP before creating the cluster.'
+    if [[ $VIP_CHECK_RESULT == occupied ]]; then
+      die "Choose a different unused VIP. $API_VIP answered a network ownership probe; K3sDeploy will not claim it."
+    fi
+    confirm "Continue even though the automated checks could not confirm that $API_VIP is unused?" || die 'Choose and reserve an unused VIP before creating the cluster.'
   fi
   confirm_yes "I confirm $API_VIP is reserved and not assigned to another device" || die 'Reserve an unused VIP before creating the cluster.'
 }

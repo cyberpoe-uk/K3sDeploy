@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Correct LVM root-volume discovery when Linux exposes the mounted root as `/dev/dm-*`, so free Ubuntu volume-group extents are reported instead of `0 GiB`.
+- Mark ineligible shared-root storage without terminating the installer, and return the operator to the storage menu with physical and virtualization-neutral disk guidance.
+- Distinguish a positive ARP duplicate-address response from an operational probe failure; occupied VIPs now stop safely, with ICMP used only as a fallback signal.
+- Recommend SSD/NVMe storage for K3s and Longhorn while retaining HDD support for appropriate workloads.
 - Default-Yes confirmations for detected hostname/address, network reservations, and safe dependency or service operations; destructive and risk-acceptance prompts remain default-No.
 - Optional installation of Ubuntu's `iputils-arping` package before checking whether a new API VIP is already in use.
 - Guided creation of a dedicated Longhorn LVM logical volume from free extents in default Ubuntu/Proxmox layouts, with root-headroom checks and exact confirmation.

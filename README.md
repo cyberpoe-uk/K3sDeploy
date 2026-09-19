@@ -51,7 +51,7 @@ Each node needs one of the following:
 - An ext4 or XFS root filesystem of at least 120 GiB with at least 60 GiB currently free.
 - A GPT-formatted OS disk with at least 20 GiB plus alignment margin genuinely unallocated for a new Longhorn partition.
 - An Ubuntu LVM volume group containing at least 20 GiB plus a 1 GiB safety margin in free extents.
-- An empty separate physical disk of at least 20 GiB.
+- An empty separate physical or virtual disk of at least 20 GiB.
 
 Longhorn and K3s do not define one universal capacity minimum because the correct size depends on PVC sizes, replicas, snapshots, backups, and expected growth. K3sDeploy uses 20 GiB as a small-lab installation floor and recommends planning at least 100 GiB per storage node for general use. These are project guardrails, not upstream guarantees. Change them deliberately in `config/defaults.env` when your capacity plan requires different values.
 
@@ -195,6 +195,8 @@ All storage modes expose `/var/lib/longhorn`, allowing first servers, joining ma
 
 This is the simplest choice. It is permitted only when root is ext4 or XFS, at least 120 GiB total, and at least 60 GiB free.
 
+The storage menu marks this choice `UNAVAILABLE` when those requirements are not met. Selecting it explains which threshold failed and returns to the storage menu instead of terminating K3sDeploy. The size of the underlying disk does not make a smaller root filesystem eligible automatically.
+
 The default guardrails are:
 
 ```text
@@ -209,7 +211,9 @@ The 30% reservation is a Longhorn scheduling rule, not a filesystem quota. The o
 
 The installer can guide creation of separate Longhorn storage without resizing existing filesystems. It understands both ordinary partition layouts and the LVM layout created by Ubuntu Server's default guided installation.
 
-Seeing a smaller root filesystem and a larger OS disk is not an error. For example, a 120 GiB Proxmox virtual disk may contain a 59 GiB root logical volume while the rest remains free inside the LVM volume group. That space is not visible to `parted` as unallocated disk space, so K3sDeploy checks both layers separately.
+Seeing a smaller root filesystem and a larger OS disk is not an error. For example, Ubuntu may place a 59 GiB root logical volume on a 120 GiB physical or virtual disk while the rest remains free inside the LVM volume group. That space is not visible to `parted` as unallocated disk space, so K3sDeploy checks both layers separately.
+
+If `lsblk` already reports the intended virtual-disk size, the guest can see that capacity. Hypervisor thin or thick provisioning does not explain a smaller root logical volume; the unused capacity may simply be free inside LVM. Check it with `sudo vgs` and `sudo lvs`. In that layout, option 2 creates separate Longhorn storage from the free extents without expanding or shrinking root.
 
 For an LVM-based root, the installer:
 
@@ -237,7 +241,7 @@ The installer never shrinks, moves, or reformats an existing root filesystem, lo
 
 If partition creation succeeds but Linux cannot expose the new device immediately, the installer stops with recovery instructions. Reboot and rerun; the empty partition will be offered as an existing candidate instead of creating another blindly.
 
-### Option 3: separate physical disk
+### Option 3: separate disk (physical or virtual)
 
 This is the recommended choice for important data. The installer displays a numbered list containing only disks that:
 
@@ -247,6 +251,10 @@ This is the recommended choice for important data. The installer displays a numb
 - Are at least 20 GiB. Disks below the 100 GiB general-use recommendation receive a clear capacity warning.
 
 The operator selects a number, reviews the complete plan, and must then type the exact disk path before any destructive action. The installer creates GPT, one ext4 partition, label `longhorn-data`, and a UUID-based `/etc/fstab` mount.
+
+For a virtual machine, attach a new empty virtual disk using the controls provided by the hypervisor or cloud platform. Follow that platform's instructions about whether the VM must be shut down or can hot-add storage. After Linux shows the new device in `lsblk`, rerun K3sDeploy and choose option 3. This applies to Proxmox, VMware, Hyper-V, KVM/libvirt, and cloud VMs; K3sDeploy does not assume one virtualization platform.
+
+For a physical machine, install an empty SSD or NVMe device, boot the machine, verify the new device with `lsblk`, and rerun option 3. K3s recommends SSD-backed storage when possible because cluster performance depends on database performance. Longhorn also recommends SSD/NVMe for performance and stability, especially during replica rebuilds and concurrent I/O. HDD storage is supported but is better suited to lighter or less latency-sensitive workloads.
 
 For separate storage, systemd drop-ins require `/var/lib/longhorn` to be mounted before either `k3s` or `k3s-agent` starts. Existing data at the mount path causes a hard stop rather than being hidden or overwritten.
 

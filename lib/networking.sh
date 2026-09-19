@@ -3,7 +3,36 @@ detect_interface(){ ip -4 route show default 2>/dev/null | awk 'NR==1{print $5}'
 detect_node_ip(){ local dev=${1:-$(detect_interface)}; ip -4 -o addr show dev "$dev" scope global 2>/dev/null | awk 'NR==1{sub(/\/.*/,"",$4);print $4}'; }
 port_reachable(){ timeout 3 bash -c "</dev/tcp/$1/$2" 2>/dev/null; }
 local_ipv4_present(){ ip -4 -o addr show scope global | awk '{sub(/\/.*/,"",$4); print $4}' | grep -Fxq "$1"; }
-vip_conflict_check(){ local vip=$1 iface=$2; if command -v arping >/dev/null; then if as_root_capture arping -D -c 2 -I "$iface" "$vip" >/dev/null 2>&1; then ok "VIP $vip is currently unclaimed"; return 0; else warn "The ARP check could not prove that $vip is unused; it may already belong to another device."; return 1; fi; else warn "arping unavailable; could not test address ownership"; return 1; fi; }
+VIP_CHECK_RESULT=unknown
+vip_conflict_check(){
+  local vip=$1 iface=$2 rc
+  VIP_CHECK_RESULT=unknown
+  if command -v arping >/dev/null 2>&1; then
+    if as_root_capture arping -D -c 3 -w 4 -I "$iface" "$vip" >/dev/null 2>&1; then
+      VIP_CHECK_RESULT=free
+      ok "VIP $vip received no ARP replies and appears to be unused"
+      return 0
+    else
+      rc=$?
+      if ((rc == 1)); then
+        VIP_CHECK_RESULT=occupied
+        warn "VIP $vip answered the duplicate-address probe and appears to be in use."
+        return 1
+      fi
+      warn "The ARP ownership check failed unexpectedly (exit $rc)."
+    fi
+  else
+    warn 'arping unavailable; the primary Layer-2 ownership check could not run.'
+  fi
+  if command -v ping >/dev/null 2>&1 && ping -n -c 1 -W 1 "$vip" >/dev/null 2>&1; then
+    VIP_CHECK_RESULT=occupied
+    warn "VIP $vip answered an ICMP ping and appears to be in use."
+    return 1
+  fi
+  VIP_CHECK_RESULT=unknown
+  warn "A ping received no reply, but that does not prove $vip is unused because devices can block ICMP."
+  return 1
+}
 
 ensure_arping(){
   command -v arping >/dev/null 2>&1 && return 0
