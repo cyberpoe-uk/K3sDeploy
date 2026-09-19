@@ -1,0 +1,6 @@
+NAME="Example Linux"
+VERSION="Example 24.04 LTS"
+ID=example
+ID_LIKE="debian test"
+PRETTY_NAME="Example Linux 24.04 LTS"
+VERSION_ID="24.04"

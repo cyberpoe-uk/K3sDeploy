@@ -24,11 +24,11 @@ cleanup() {
 }
 
 detect_operating_system() {
-    local PRETTY_NAME='Unknown Linux'
-    [[ -r /etc/os-release ]] || return 1
-    # shellcheck disable=SC1091
-    source /etc/os-release
-    OS_NAME=${PRETTY_NAME:-${NAME:-Unknown Linux}}
+    local os_release=${OS_RELEASE_FILE:-/etc/os-release} os_name
+    [[ -r $os_release ]] || return 1
+    os_name=$(os_release_value PRETTY_NAME "$os_release")
+    [[ -n $os_name ]] || os_name=$(os_release_value NAME "$os_release")
+    OS_NAME=${os_name:-Unknown Linux}
     if command -v apt-get >/dev/null 2>&1; then OS_PACKAGE_MANAGER=apt
     elif command -v dnf >/dev/null 2>&1; then OS_PACKAGE_MANAGER=dnf
     elif command -v yum >/dev/null 2>&1; then OS_PACKAGE_MANAGER=yum
@@ -36,6 +36,21 @@ detect_operating_system() {
     else OS_PACKAGE_MANAGER=unsupported
     fi
     export OS_NAME OS_PACKAGE_MANAGER
+}
+
+os_release_value() {
+    local key=$1 file=${2:-/etc/os-release}
+    [[ -r $file ]] || return 0
+    awk -v key="$key" '
+        index($0, key "=") == 1 {
+            value=substr($0, length(key)+2)
+            if (value ~ /^".*"$/) { sub(/^"/, "", value); sub(/"$/, "", value) }
+            else if (value ~ /^\047.*\047$/) { sub(/^\047/, "", value); sub(/\047$/, "", value) }
+            gsub(/\\"/, "\"", value)
+            print value
+            exit
+        }
+    ' "$file"
 }
 
 package_refresh() {

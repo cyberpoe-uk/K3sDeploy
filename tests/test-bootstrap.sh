@@ -37,6 +37,13 @@ assert_eq() {
     fi
 }
 
+readonly VERSION=launcher-test
+OS_RELEASE_FILE="$ROOT/tests/fixtures/os-release" detect_operating_system
+assert_eq "$OS_NAME" 'Example Linux 24.04 LTS'
+assert_eq "$VERSION" launcher-test
+OS_NAME='Test Linux'
+OS_PACKAGE_MANAGER=apt
+
 command() {
     if [[ "$*" == '-v git' ]]; then
         return "${MOCK_GIT_PRESENT:-1}"

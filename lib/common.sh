@@ -10,16 +10,13 @@ CONFIG_FILE=${CONFIG_FILE:-/etc/rancher/k3s/config.yaml}
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 detect_operating_system(){
-  local ID=unknown ID_LIKE= PRETTY_NAME='Unknown Linux' VERSION_ID=unknown
-  if [[ -r /etc/os-release ]]; then
-    # Values are provided by the operating system using shell-compatible syntax.
-    # shellcheck disable=SC1091
-    source /etc/os-release
-  fi
-  OS_ID=${ID:-unknown}
-  OS_ID_LIKE=${ID_LIKE:-}
-  OS_NAME=${PRETTY_NAME:-${NAME:-Unknown Linux}}
-  OS_VERSION_ID=${VERSION_ID:-unknown}
+  local os_release=${OS_RELEASE_FILE:-/etc/os-release} os_name
+  OS_ID=$(os_release_value ID "$os_release"); OS_ID=${OS_ID:-unknown}
+  OS_ID_LIKE=$(os_release_value ID_LIKE "$os_release")
+  os_name=$(os_release_value PRETTY_NAME "$os_release")
+  [[ -n $os_name ]] || os_name=$(os_release_value NAME "$os_release")
+  OS_NAME=${os_name:-Unknown Linux}
+  OS_VERSION_ID=$(os_release_value VERSION_ID "$os_release"); OS_VERSION_ID=${OS_VERSION_ID:-unknown}
   if command -v apt-get >/dev/null 2>&1; then OS_PACKAGE_MANAGER=apt
   elif command -v dnf >/dev/null 2>&1; then OS_PACKAGE_MANAGER=dnf
   elif command -v yum >/dev/null 2>&1; then OS_PACKAGE_MANAGER=yum
@@ -27,6 +24,21 @@ detect_operating_system(){
   else OS_PACKAGE_MANAGER=unsupported
   fi
   export OS_ID OS_ID_LIKE OS_NAME OS_VERSION_ID OS_PACKAGE_MANAGER
+}
+
+os_release_value(){
+  local key=$1 file=${2:-/etc/os-release}
+  [[ -r $file ]] || return 0
+  awk -v key="$key" '
+    index($0, key "=") == 1 {
+      value=substr($0, length(key)+2)
+      if (value ~ /^".*"$/) { sub(/^"/, "", value); sub(/"$/, "", value) }
+      else if (value ~ /^\047.*\047$/) { sub(/^\047/, "", value); sub(/\047$/, "", value) }
+      gsub(/\\"/, "\"", value)
+      print value
+      exit
+    }
+  ' "$file"
 }
 
 package_refresh(){

@@ -6,6 +6,13 @@ pass=0; fail=0
 assert_ok(){ if "$@"; then ((++pass)); else echo "FAIL expected success: $*"; ((++fail)); fi; }
 assert_bad(){ if "$@"; then echo "FAIL expected failure: $*"; ((++fail)); else ((++pass)); fi; }
 assert_eq(){ if [[ $1 == "$2" ]]; then ((++pass)); else echo "FAIL '$1' != '$2'"; ((++fail)); fi; }
+installer_version=$VERSION
+OS_RELEASE_FILE="$ROOT/tests/fixtures/os-release" detect_operating_system
+assert_eq "$OS_NAME" 'Example Linux 24.04 LTS'
+assert_eq "$OS_ID" example
+assert_eq "$OS_ID_LIKE" 'debian test'
+assert_eq "$OS_VERSION_ID" 24.04
+assert_eq "$VERSION" "$installer_version"
 assert_ok validate_ipv4 10.10.20.13
 assert_ok validate_ipv4 0.0.0.0
 assert_bad validate_ipv4 256.1.1.1
