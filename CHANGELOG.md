@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Wait for the MetalLB speaker and admission-webhook endpoint, then retry pool configuration during temporary webhook startup failures.
+- Correct the repeated MetalLB pool in the installation summary and persist pool details so safe repair can resume a partial first-manager installation.
+- Add guided shared NFS storage using the pinned Kubernetes NFS CSI driver, NFSv4.1 reachability/mount checks, and a retained dynamic StorageClass.
+- Mark MetalLB and three-replica Longhorn as the HA recommendations, enable least-effort replica auto-balancing, and disable K3s local-storage unless an advanced-profile user explicitly accepts its non-HA risk.
+- Allow safe repair to continue missing MetalLB, Longhorn, or NFS CSI add-ons from saved installer state.
+- Warn when an older installation still exposes the non-selected local-path provisioner instead of removing potentially used storage automatically.
 - Add a yellow K3sDeploy identity banner and a startup choice between recommended and advanced/custom installation profiles.
 - Let advanced users select MetalLB, built-in K3s ServiceLB, or external load balancing, plus Longhorn, K3s local-path, or external persistent storage; intentionally omitted components are skipped during installation and validation.
 - Prevent a normal clean-node Longhorn mount check from aborting phase 2 under strict error handling.

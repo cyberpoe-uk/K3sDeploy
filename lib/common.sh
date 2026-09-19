@@ -71,6 +71,9 @@ package_for(){
     arping:dnf|arping:yum|arping:zypper) printf 'iputils\n';;
     iscsi:dnf|iscsi:yum) printf 'iscsi-initiator-utils\n';;
     iscsi:apt|iscsi:zypper) printf 'open-iscsi\n';;
+    nfs:apt) printf 'nfs-common\n';;
+    nfs:dnf|nfs:yum) printf 'nfs-utils\n';;
+    nfs:zypper) printf 'nfs-client\n';;
     *) return 1;;
   esac
 }

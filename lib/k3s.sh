@@ -3,7 +3,7 @@ render_k3s_config(){
   local mode=$1 token=${2:-} component disable_components=
   local -a disabled=()
   [[ ${LOAD_BALANCER_MODE:-metallb} == servicelb ]] || disabled+=(servicelb)
-  [[ ${STORAGE_PROVIDER:-longhorn} != external ]] || disabled+=(local-storage)
+  [[ ${STORAGE_PROVIDER:-longhorn} == local-path ]] || disabled+=(local-storage)
   if ((${#disabled[@]})); then
     disable_components=disable:
     for component in "${disabled[@]}"; do disable_components+=$'\n  - '"$component"; done

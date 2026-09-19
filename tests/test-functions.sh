@@ -24,6 +24,11 @@ assert_eq "$(package_for iscsi)" open-iscsi
 OS_PACKAGE_MANAGER=dnf
 assert_eq "$(package_for arping)" iputils
 assert_eq "$(package_for iscsi)" iscsi-initiator-utils
+assert_eq "$(package_for nfs)" nfs-utils
+OS_PACKAGE_MANAGER=apt
+assert_eq "$(package_for nfs)" nfs-common
+OS_PACKAGE_MANAGER=zypper
+assert_eq "$(package_for nfs)" nfs-client
 OS_PACKAGE_MANAGER=apt
 assert_ok confirm_yes <<< ''
 assert_ok confirm_yes <<< 'yes'
@@ -39,7 +44,7 @@ rendered=$(render_k3s_config join 'secret-test-token')
 assert_ok grep -q '^server: https://10.10.20.10:6443$' <<<"$rendered"
 assert_ok grep -q '^token: "secret-test-token"$' <<<"$rendered"
 assert_ok grep -q '^  - servicelb$' <<<"$rendered"
-assert_bad grep -q '^  - local-storage$' <<<"$rendered"
+assert_ok grep -q '^  - local-storage$' <<<"$rendered"
 LOAD_BALANCER_MODE=servicelb STORAGE_PROVIDER=local-path
 servicelb_rendered=$(render_k3s_config first)
 assert_bad grep -q '^disable:$' <<<"$servicelb_rendered"
@@ -49,6 +54,9 @@ LOAD_BALANCER_MODE=external STORAGE_PROVIDER=external
 external_rendered=$(render_k3s_config first)
 assert_ok grep -q '^  - servicelb$' <<<"$external_rendered"
 assert_ok grep -q '^  - local-storage$' <<<"$external_rendered"
+LOAD_BALANCER_MODE=metallb STORAGE_PROVIDER=nfs
+nfs_rendered=$(render_k3s_config first)
+assert_ok grep -q '^  - local-storage$' <<<"$nfs_rendered"
 LOAD_BALANCER_MODE=metallb STORAGE_PROVIDER=longhorn
 agent_rendered=$(render_k3s_config agent 'agent-secret-token')
 assert_ok grep -q '^server: https://10.10.20.10:6443$' <<<"$agent_rendered"

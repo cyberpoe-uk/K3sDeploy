@@ -37,7 +37,9 @@ report_fresh_node(){
     report 'Longhorn storage' MISSING 'not configured'
     report 'Persistent storage' 'NOT TESTED' 'install the cluster before running the smoke test'
   elif [[ ${STORAGE_PROVIDER:-longhorn} == local-path ]]; then
-    report 'Persistent storage' MISSING 'K3s local-path requires K3s installation'
+    report 'Persistent storage' MISSING 'K3s local-path requires K3s; it is non-HA node-local storage'
+  elif [[ ${STORAGE_PROVIDER:-longhorn} == nfs ]]; then
+    report 'Persistent storage' MISSING 'NFS CSI requires K3s installation'
   else
     report 'Persistent storage' SKIP 'externally managed; validate it with its own tooling'
   fi
@@ -76,15 +78,25 @@ validate_cluster(){
     validate_kube_vip || true
     if [[ ${LOAD_BALANCER_MODE:-metallb} == metallb ]]; then validate_metallb || true; else report MetalLB SKIP "not selected ($LOAD_BALANCER_MODE mode)"; fi
     if [[ ${STORAGE_PROVIDER:-longhorn} == longhorn ]]; then validate_longhorn || true; else report Longhorn SKIP "$STORAGE_PROVIDER storage selected"; fi
+    if [[ ${STORAGE_PROVIDER:-longhorn} != local-path ]]; then
+      if kubectl_local -n kube-system get deploy local-path-provisioner >/dev/null 2>&1; then
+        report 'K3s local-path' WARN 'present although it is not selected; do not use it for HA workloads'
+      else
+        report 'K3s local-path' OK 'disabled as planned'
+      fi
+    fi
     if kubectl_local -n kube-system get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null | grep -q .; then report Traefik OK; else report Traefik WARN 'no external IP'; fi
   fi
   if [[ ${STORAGE_PROVIDER:-longhorn} == local-path ]]; then
     report open-iscsi SKIP 'Longhorn not selected'
     if kubectl_local -n kube-system get deploy local-path-provisioner >/dev/null 2>&1 && kubectl_local get storageclass local-path >/dev/null 2>&1; then
-      report 'Persistent storage' OK 'K3s local-path provisioner is available'
+      report 'Persistent storage' WARN 'K3s local-path is available but is not HA'
     else
       report 'Persistent storage' FAIL 'K3s local-path provisioner or StorageClass is missing'
     fi
+  elif [[ ${STORAGE_PROVIDER:-longhorn} == nfs ]]; then
+    report open-iscsi SKIP 'Longhorn not selected'
+    validate_nfs || true
   elif [[ ${STORAGE_PROVIDER:-longhorn} != longhorn ]]; then
     report open-iscsi SKIP 'Longhorn not selected'
     report 'Persistent storage' SKIP 'externally managed; validate it with its own tooling'
@@ -92,6 +104,51 @@ validate_cluster(){
     if ! command -v iscsiadm >/dev/null 2>&1; then report open-iscsi MISSING 'package is not installed'; elif systemctl is-active --quiet iscsid; then report open-iscsi OK; else report open-iscsi FAIL 'installed service is inactive'; fi
     validate_storage_selection || true
     report 'Persistent storage' 'NOT TESTED' 'run tests/smoke-longhorn.sh explicitly'
+  fi
+}
+
+repair_managed_addons(){
+  [[ ${NODE_ROLE:-server} != agent ]] || return 0
+  if ! kubectl_local get --raw=/readyz >/dev/null 2>&1; then
+    warn 'The Kubernetes API is not ready; cluster add-ons cannot be reconciled yet.'
+    return 0
+  fi
+
+  if [[ ${LOAD_BALANCER_MODE:-metallb} == metallb ]] && {
+    [[ $(kubectl_local -n metallb-system get deploy controller -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true) != 1 ]] ||
+    ! [[ $(kubectl_local -n metallb-system get daemonset speaker -o jsonpath='{.status.numberReady}' 2>/dev/null || true) =~ ^[1-9][0-9]*$ ]] ||
+    ! kubectl_local -n metallb-system get ipaddresspool homelab-pool >/dev/null 2>&1 ||
+    ! kubectl_local -n metallb-system get l2advertisement homelab-l2 >/dev/null 2>&1
+  }; then
+    warn 'The saved plan selects MetalLB, but its address-pool configuration is incomplete.'
+    if [[ -z ${POOL_START:-} || -z ${POOL_END:-} ]]; then collect_metallb_pool; fi
+    if confirm_yes 'Retry the pinned MetalLB installation and address-pool configuration now?'; then
+      install_metallb
+      persist_state
+    fi
+  fi
+
+  if [[ ${STORAGE_PROVIDER:-longhorn} == longhorn ]] && {
+    [[ $(kubectl_local -n longhorn-system get deploy longhorn-driver-deployer -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true) != 1 ]] ||
+    [[ $(kubectl_local -n longhorn-system get deploy longhorn-ui -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true) != 1 ]]
+  }; then
+    warn 'The saved plan selects Longhorn, but its installation is missing or incomplete.'
+    if confirm_yes 'Continue the pinned Longhorn installation now?'; then
+      LONGHORN_REPLICAS=${LONGHORN_REPLICAS:-$LONGHORN_DEFAULT_REPLICAS}
+      install_longhorn
+    fi
+  elif [[ ${STORAGE_PROVIDER:-longhorn} == nfs ]] && {
+    ! kubectl_local get csidriver nfs.csi.k8s.io >/dev/null 2>&1 ||
+    ! kubectl_local get storageclass nfs-csi-retain >/dev/null 2>&1 ||
+    [[ $(kubectl_local -n kube-system get deploy csi-nfs-controller -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true) != 1 ]]
+  }; then
+    warn 'The saved plan selects NFS, but its CSI installation is missing or incomplete.'
+    if [[ -z ${NFS_SERVER:-} || -z ${NFS_EXPORT:-} ]]; then collect_nfs_config; fi
+    if confirm_yes 'Verify the NFS share and install the pinned NFS CSI driver now?'; then
+      verify_nfs_share
+      install_nfs_csi
+      persist_state
+    fi
   fi
 }
 safe_repair(){
@@ -114,7 +171,10 @@ safe_repair(){
   if [[ ${STORAGE_PROVIDER:-longhorn} == longhorn ]]; then
     command -v iscsiadm >/dev/null || { confirm_yes 'Install missing open-iscsi?' && ensure_iscsi; }
     systemctl is-active --quiet iscsid 2>/dev/null || { confirm_yes 'Enable/start iscsid?' && as_root systemctl enable --now iscsid; }
+  elif [[ ${STORAGE_PROVIDER:-longhorn} == nfs ]]; then
+    ensure_nfs_client
   fi
+  repair_managed_addons
   [[ ! -f $CONFIG_FILE ]] || warn "Configuration reconciliation requires desired values and explicit confirmation; no automatic cluster-identity changes are made."
   validate_cluster
 }

@@ -13,8 +13,9 @@ The project favors visible checks and explicit confirmation over unattended dest
 | MetalLB | `v0.16.1` | Recommended-profile `LoadBalancer` addresses for applications |
 | Traefik | K3s packaged version | HTTP and HTTPS ingress |
 | Longhorn | `v1.12.1` | Recommended-profile replicated persistent storage using the V1 filesystem engine |
+| NFS CSI driver | `v4.13.4` | Optional shared NFS storage using an existing NFSv4.1 server/export |
 
-Versions are pinned in `config/versions.env`; installations never follow a moving `latest` tag. The recommended profile disables K3s ServiceLB because MetalLB owns application load-balancer addresses. K3s local-path remains available alongside Longhorn for compatibility; select the intended StorageClass explicitly for important workloads. The advanced profile can retain either built-in component or leave that responsibility to an external system. kube-vip is used only for the Kubernetes API.
+Versions are pinned in `config/versions.env`; installations never follow a moving `latest` tag. The recommended profile disables K3s ServiceLB because MetalLB owns application load-balancer addresses, and disables K3s local-path because Longhorn owns persistent storage. Local-path is enabled only when an advanced-profile user explicitly accepts its non-HA risk. The advanced profile can retain either built-in component or leave that responsibility to an external system. kube-vip is used only for the Kubernetes API.
 
 > MetalLB v0.16.1 matches the validated platform, but its released images have a reported fixable gRPC vulnerability as of September 2026. Review upstream security releases and test any pin change before production use.
 
@@ -62,6 +63,7 @@ Decide these addresses before installation:
 - One fixed Kubernetes API VIP on the same Layer-2 network as the managers.
 - One unique static address per node.
 - A MetalLB range excluded from DHCP and all node/VIP addresses when MetalLB is selected.
+- TCP `2049` access from every node to the same NFS server when shared NFS is selected.
 
 Allow the required traffic between nodes. Important defaults include TCP `6443` for the API, TCP `2379-2380` between embedded-etcd managers, UDP `8472` for Flannel VXLAN, and TCP `10250` between nodes. Do not expose UDP `8472` to untrusted networks.
 
@@ -166,9 +168,9 @@ cd K3sDeploy-0.1.0
 K3sDeploy starts with its yellow identity banner and asks for an installation profile before displaying the node-action menu:
 
 - **Recommended installation:** the guided path used throughout this README. K3sDeploy configures kube-vip, MetalLB, and Longhorn.
-- **Advanced/custom installation:** choose MetalLB, built-in K3s ServiceLB, or externally managed load balancing; then choose Longhorn, built-in K3s local-path storage, or externally managed persistent storage.
+- **Advanced/custom installation:** MetalLB remains the recommended load balancer, but K3s ServiceLB or an externally managed system can be selected. Storage choices are Longhorn, guided shared NFS, explicitly accepted non-HA local-path, or another externally managed system.
 
-“External” means K3sDeploy deliberately leaves that component uninstalled. For external storage, it also disables K3s local-storage so an unintended local StorageClass does not compete with the replacement CSI provider. The local-path choice retains K3s's simple node-local provisioner but does not provide Longhorn-style replication or failover. K3sDeploy does not guess how to configure Cilium, a cloud controller, another load balancer, or another CSI provider. Install and validate the selected external system using its own documentation. Use the same advanced choices on every node in one cluster.
+“External” means K3sDeploy deliberately leaves that component uninstalled. For Longhorn, NFS, or external storage, it disables K3s local-storage so an unintended node-local StorageClass does not compete with the selected provider. The local-path choice retains K3s's simple node-local provisioner, displays a data-loss warning, and requires the exact confirmation `ACCEPT-NON-HA-STORAGE`; it does not provide replication or failover. K3sDeploy does not guess how to configure Cilium, a cloud controller, another load balancer, or another CSI provider. Install and validate an unmanaged external system using its own documentation. Use the same advanced choices on every node in one cluster.
 
 Available flags:
 
@@ -284,6 +286,23 @@ For separate storage, systemd drop-ins require `/var/lib/longhorn` to be mounted
 
 Longhorn replication is not a backup. Maintain tested backups outside the cluster.
 
+K3sDeploy configures a desired count of three replicas for new Longhorn volumes and enables Longhorn's `least-effort` replica auto-balancing. The desired count is deliberately capped at three; it does not increase to 5, 10, or 20 replicas as more nodes join. A one-node bootstrap is not storage-HA: three storage-capable nodes are required before new three-replica volumes can become fully healthy. Depending on Longhorn's degraded-availability policy, early volume creation may remain degraded or wait for enough eligible nodes. As eligible nodes and disks appear, Longhorn can schedule or rebuild the missing copies toward the existing three-replica target, so K3sDeploy does not rewrite every volume during each node join.
+
+Changing a StorageClass affects only volumes created afterward. K3sDeploy therefore sets the final desired count from the beginning instead of starting at one and repeatedly changing it. Volumes deliberately created with another StorageClass or replica count are not silently rewritten. Do not treat the cluster as storage-HA until all required replicas are healthy on separate nodes.
+
+## Shared NFS storage
+
+The advanced profile can configure the pinned Kubernetes NFS CSI driver against an existing NFSv4.1 service. K3sDeploy asks for values such as:
+
+```text
+NFS server: 10.10.20.40
+NFS export: /mnt/pool/k3s
+```
+
+The same server and export must be reachable from every cluster node. K3sDeploy installs the operating system's NFS client package, checks TCP port `2049`, temporarily mounts the export with restrictive mount options, creates and removes a probe directory to verify provisioning access, installs the pinned CSI driver on the first manager, and creates the default `nfs-csi-retain` StorageClass with retained backing directories and a `Retain` reclaim policy.
+
+Shared does not automatically mean highly available. A single NFS server, network path, or underlying pool can still be a single point of failure. Use an HA NFS service and independently protected data when the cluster requires storage availability. The NFS CSI driver dynamically provisions subdirectories; it does not create, replicate, back up, or repair the NFS server itself.
+
 ## Promoting a worker to manager
 
 Option 4 is a controlled role reinstall, not a label change. K3s cannot run separate agent and server services simultaneously.
@@ -303,7 +322,9 @@ Longhorn data is not intentionally removed, but verify healthy replicas and back
 
 Option 5 produces a read-only health report covering the OS, network, K3s service, Kubernetes API, node readiness and roles, API VIP, kube-vip, ServiceLB, MetalLB, Traefik, iSCSI, Longhorn, and the expected storage mount/UUID. Components intentionally omitted by the advanced profile are reported as `SKIP`. On a clean node, software that has never been installed is reported as `MISSING` or `SKIP` rather than failed.
 
-Option 6 offers only narrow repairs such as starting an existing stopped service or installing `open-iscsi`. On a clean node it explains that there is nothing to repair and points to installation options 1–3; it never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
+If a node created by an older K3sDeploy release still exposes the local-path provisioner while Longhorn, NFS, or external storage is selected, validation reports a warning instead of deleting or reconfiguring potentially used storage automatically.
+
+Option 6 offers only narrow repairs such as starting an existing stopped service, installing a required storage client, or continuing a saved MetalLB, Longhorn, or NFS CSI installation that stopped partway through. It asks before reconciling a missing add-on. On a clean node it explains that there is nothing to repair and points to installation options 1–3; it never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
 
 ## Safety and idempotency
 
@@ -382,6 +403,9 @@ This project is released under the MIT License. See `LICENSE`.
 - [K3s installation requirements](https://docs.k3s.io/installation/requirements)
 - [K3s high availability with embedded etcd](https://docs.k3s.io/datastore/ha-embedded)
 - [K3s packaged components and disable flags](https://docs.k3s.io/installation/packaged-components)
+- [K3s volumes and local-path storage](https://docs.k3s.io/add-ons/storage)
+- [Kubernetes NFS CSI driver](https://github.com/kubernetes-csi/csi-driver-nfs)
+- [NFS CSI driver parameters](https://github.com/kubernetes-csi/csi-driver-nfs/blob/master/docs/driver-parameters.md)
 - [Longhorn v1.12.1 best practices](https://longhorn.io/docs/1.12.1/best-practices/)
 - [Longhorn disk and scheduling settings](https://longhorn.io/docs/1.12.1/references/settings/)
 - [Longhorn filesystem disk configuration](https://longhorn.io/docs/1.12.1/nodes-and-volumes/nodes/multidisk/)
