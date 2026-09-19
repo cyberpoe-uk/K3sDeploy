@@ -2,6 +2,7 @@
 
 readonly LONGHORN_STANDARD_PATH=/var/lib/longhorn
 export STORAGE_MODE STORAGE_DEVICE STORAGE_DEVICE_MAJMIN STORAGE_DESCRIPTION LONGHORN_PATH LONGHORN_DEVICE_UUID
+export STORAGE_LVM_VG STORAGE_LVM_LV STORAGE_LVM_FREE_BYTES
 
 gib_from_bytes(){ awk -v bytes="$1" 'BEGIN { printf "%d", bytes / 1073741824 }'; }
 capacity_meets_minimum(){ (( $1 >= $2 )); }
@@ -40,6 +41,38 @@ root_available_gib(){
 
 block_capacity_gib(){ gib_from_bytes "$(lsblk -bdno SIZE "$1")"; }
 
+root_lvm_vg(){
+  local device type
+  command -v lvs >/dev/null 2>&1 || return 1
+  device=$(readlink -f "$(root_source_device)")
+  [[ -b $device ]] || return 1
+  type=$(lsblk -dnro TYPE "$device" 2>/dev/null || true)
+  [[ $type == lvm ]] || return 1
+  as_root_capture lvs --noheadings -o vg_name "$device" 2>/dev/null | awk '{$1=$1; if (NF) { print; exit }}'
+}
+
+parse_lvm_bytes(){ awk '{gsub(/[<>,]/, "", $1); printf "%.0f", $1; exit}'; }
+vg_free_bytes(){ as_root_capture vgs --noheadings --units b --nosuffix -o vg_free "$1" 2>/dev/null | parse_lvm_bytes; }
+
+check_os_headroom(){
+  local disk=$1 root_gib available_gib disk_gib allocated_percent
+  root_gib=$(root_capacity_gib); available_gib=$(root_available_gib); disk_gib=$(block_capacity_gib "$disk")
+  allocated_percent=$((root_gib * 100 / disk_gib))
+  printf '\nOS headroom check:\n'
+  printf '  Root filesystem: %d GiB total, %d GiB available\n' "$root_gib" "$available_gib"
+  printf '  Root allocation: approximately %d%% of the %d GiB OS disk\n' "$allocated_percent" "$disk_gib"
+  if ((allocated_percent < OS_DISK_MIN_ROOT_PERCENT)); then
+    warn "The root filesystem is below the ${OS_DISK_MIN_ROOT_PERCENT}% OS-headroom guideline. Creating separate Longhorn storage will not enlarge root."
+    confirm "Continue with the smaller fixed root filesystem?" || return 1
+  else
+    ok "The root allocation meets the ${OS_DISK_MIN_ROOT_PERCENT}% OS-headroom guideline"
+  fi
+  if ((available_gib < OS_ROOT_MIN_AVAILABLE_GIB)); then
+    warn "Root has only ${available_gib} GiB available; at least ${OS_ROOT_MIN_AVAILABLE_GIB} GiB is required before creating separate Longhorn storage on the OS disk."
+    return 1
+  fi
+}
+
 warn_small_longhorn_capacity(){
   local size_gib=$1
   if ((size_gib < LONGHORN_DATA_RECOMMENDED_GIB)); then
@@ -58,7 +91,7 @@ require_storage_inspection_tools(){ local cmd; for cmd in awk df findmnt lsblk r
 ensure_parted_for_planning(){
   command -v parted >/dev/null 2>&1 && return
   $DRY_RUN && die "Option 2 needs the 'parted' package to inspect unallocated space. Install it, then repeat the dry run."
-  confirm "Install the standard 'parted' package to inspect unallocated space safely?" || die "Cannot plan a new partition without parted"
+  confirm_yes "Install the standard 'parted' package to inspect unallocated space safely?" || die "Cannot plan a new partition without parted"
   as_root apt-get update
   as_root apt-get install -y parted
   need_cmd parted
@@ -73,6 +106,17 @@ ensure_storage_preparation_tools(){
     as_root apt-get install -y parted e2fsprogs util-linux
   fi
   for cmd in blkid mkfs.ext4 parted partprobe udevadm; do need_cmd "$cmd"; done
+}
+
+ensure_lvm_preparation_tools(){
+  local missing=false cmd
+  for cmd in blkid mkfs.ext4 lvs vgs lvcreate udevadm; do command -v "$cmd" >/dev/null 2>&1 || missing=true; done
+  if $missing; then
+    info 'Installing standard Ubuntu LVM and filesystem tools (lvm2, e2fsprogs, util-linux)'
+    as_root apt-get update
+    as_root apt-get install -y lvm2 e2fsprogs util-linux
+  fi
+  for cmd in blkid mkfs.ext4 lvs vgs lvcreate udevadm; do need_cmd "$cmd"; done
 }
 
 partition_table_type(){ as_root_capture parted -m -s "$1" unit B print | awk -F: 'NR==2{print $6}'; }
@@ -219,6 +263,59 @@ create_os_disk_partition(){
   format_existing_partition "$partition" true
 }
 
+plan_lvm_volume(){
+  local vg=$1 free_bytes=$2 free_gib maximum_gib recommended_gib requested_gib
+  free_gib=$(gib_from_bytes "$free_bytes")
+  ((free_gib > LONGHORN_DATA_MIN_GIB)) || return 1
+  maximum_gib=$((free_gib-1)); recommended_gib=$maximum_gib
+  printf '\nUbuntu LVM has %d GiB unallocated inside volume group %s.\n' "$free_gib" "$vg"
+  printf 'Recommended Longhorn logical volume: %d GiB (leaves approximately 1 GiB free in the volume group).\n' "$recommended_gib"
+  printf 'This uses only currently free LVM extents; it does not shrink or change the root logical volume.\n'
+  read -r -p "Longhorn logical volume size in GiB [$recommended_gib]: " requested_gib
+  requested_gib=${requested_gib:-$recommended_gib}
+  [[ $requested_gib =~ ^[0-9]+$ ]] || die 'Logical volume size must be a whole number of GiB'
+  ((requested_gib>=LONGHORN_DATA_MIN_GIB && requested_gib<=maximum_gib)) || die "Choose a size between ${LONGHORN_DATA_MIN_GIB} and ${maximum_gib} GiB"
+  warn_small_longhorn_capacity "$requested_gib"
+  STORAGE_MODE=os-lvm
+  STORAGE_LVM_VG=$vg
+  STORAGE_LVM_LV=longhorn-data
+  STORAGE_LVM_FREE_BYTES=$free_bytes
+  STORAGE_PARTITION_SIZE_GIB=$requested_gib
+  STORAGE_DEVICE="/dev/$vg/$STORAGE_LVM_LV"
+  STORAGE_DEVICE_MAJMIN=
+  STORAGE_DESCRIPTION="create ${requested_gib} GiB LVM logical volume $vg/$STORAGE_LVM_LV and format it as ext4"
+  LONGHORN_PATH=$LONGHORN_STANDARD_PATH
+  LONGHORN_DEVICE_UUID=
+  info "Planned LVM logical volume: $vg/$STORAGE_LVM_LV (${requested_gib} GiB). No LVM or filesystem change has occurred."
+}
+
+create_lvm_volume(){
+  local current_free required_bytes exact device
+  ensure_longhorn_mountpoint_empty
+  ensure_lvm_preparation_tools
+  as_root_capture lvs "$STORAGE_LVM_VG/$STORAGE_LVM_LV" >/dev/null 2>&1 &&
+    die "Logical volume $STORAGE_LVM_VG/$STORAGE_LVM_LV now exists. No formatting was attempted; inspect it before retrying."
+  current_free=$(vg_free_bytes "$STORAGE_LVM_VG")
+  required_bytes=$((STORAGE_PARTITION_SIZE_GIB * 1073741824))
+  [[ $current_free =~ ^[0-9]+$ ]] && ((current_free >= required_bytes)) ||
+    die "LVM free space changed after planning. No logical volume was created; run K3sDeploy again."
+  warn "A new ${STORAGE_PARTITION_SIZE_GIB} GiB logical volume will be allocated from free space in $STORAGE_LVM_VG. Existing logical volumes will not be resized."
+  read -r -p "Type 'CREATE ${STORAGE_PARTITION_SIZE_GIB}GiB LV ON $STORAGE_LVM_VG' to continue: " exact
+  [[ $exact == "CREATE ${STORAGE_PARTITION_SIZE_GIB}GiB LV ON $STORAGE_LVM_VG" ]] || die 'Exact LVM confirmation failed'
+  if $DRY_RUN; then
+    change "Would create and format LVM logical volume $STORAGE_LVM_VG/$STORAGE_LVM_LV"
+    LONGHORN_PATH=$LONGHORN_STANDARD_PATH
+    return
+  fi
+  as_root lvcreate --yes --size "${STORAGE_PARTITION_SIZE_GIB}G" --name "$STORAGE_LVM_LV" "$STORAGE_LVM_VG"
+  as_root udevadm settle
+  device=$(as_root_capture lvs --noheadings -o lv_path "$STORAGE_LVM_VG/$STORAGE_LVM_LV" | awk '{$1=$1; print; exit}')
+  [[ -b $device ]] || die "The logical volume was created, but its block device is unavailable. Inspect $STORAGE_LVM_VG/$STORAGE_LVM_LV before retrying."
+  STORAGE_DEVICE=$device
+  as_root mkfs.ext4 -L longhorn-data "$device"
+  add_longhorn_mount "$device"
+}
+
 prepare_empty_disk(){
   local device=$1 part model size exact size_gib type children fstype mounts pttype current_root_disk
   [[ -b $device ]] || die "Selected disk no longer exists: $device"
@@ -257,8 +354,19 @@ select_root_storage(){
 
 select_os_disk_partition(){
   local root_disk table_type region free_start free_end free_bytes free_gib maximum_gib recommended_gib requested_gib subchoice
+  local lvm_vg= lvm_free_bytes=0 lvm_free_gib=0 default_subchoice=4
   local -a _existing_partitions=()
   root_disk=$(root_parent_disk) || die "Could not safely identify the physical OS disk. Choose a dedicated disk instead."
+  check_os_headroom "$root_disk" || {
+    warn 'Separate storage on the OS disk is not recommended with the current root allocation/free space.'
+    return 1
+  }
+  lvm_vg=$(root_lvm_vg || true)
+  if [[ -n $lvm_vg ]]; then
+    lvm_free_bytes=$(vg_free_bytes "$lvm_vg" || true)
+    [[ $lvm_free_bytes =~ ^[0-9]+$ ]] || lvm_free_bytes=0
+    lvm_free_gib=$(gib_from_bytes "$lvm_free_bytes")
+  fi
   ensure_parted_for_planning
   table_type=$(partition_table_type "$root_disk")
   [[ $table_type == gpt ]] || die "Guided partition creation supports GPT disks only; $root_disk uses '$table_type'. Choose root storage, a dedicated disk, or prepare a partition manually."
@@ -268,12 +376,51 @@ select_os_disk_partition(){
   free_gib=0; [[ -z ${free_bytes:-} ]] || free_gib=$(gib_from_bytes "$free_bytes")
   mapfile -t _existing_partitions < <(unused_partitions "$root_disk")
   printf '\nOS-disk storage choices for %s:\n' "$root_disk"
-  if ((free_gib > LONGHORN_DATA_MIN_GIB)); then printf '  1. Create a new Longhorn partition from the largest unallocated region (%d GiB free)\n' "$free_gib"; else printf '  1. Create a new partition (unavailable: largest free region is only %d GiB)\n' "$free_gib"; fi
-  printf '  2. Use an existing unused partition (%d eligible found)\n' "${#_existing_partitions[@]}"
-  printf '\nNo existing partition will be shrunk or moved.\n'
-  read -r -p 'Selection [1]: ' subchoice; subchoice=${subchoice:-1}
-  if [[ $subchoice == 2 ]]; then choose_existing_partition "$root_disk"; return; fi
-  [[ $subchoice == 1 ]] || die "Invalid partition choice"
+  if ((lvm_free_gib > LONGHORN_DATA_MIN_GIB)); then
+    printf '  1. Create a Longhorn logical volume from Ubuntu LVM free space (%d GiB free)\n' "$lvm_free_gib"
+    default_subchoice=1
+  else
+    printf '  1. Create an LVM logical volume (unavailable: %d GiB free in the root volume group)\n' "$lvm_free_gib"
+  fi
+  if ((free_gib > LONGHORN_DATA_MIN_GIB)); then
+    printf '  2. Create a physical partition from unallocated disk space (%d GiB free)\n' "$free_gib"
+    [[ $default_subchoice == 4 ]] && default_subchoice=2
+  else
+    printf '  2. Create a physical partition (unavailable: %d GiB unallocated outside existing partitions)\n' "$free_gib"
+  fi
+  printf '  3. Use an existing unused partition (%d eligible found)\n' "${#_existing_partitions[@]}"
+  ((${#_existing_partitions[@]} > 0)) && [[ $default_subchoice == 4 ]] && default_subchoice=3
+  printf '  4. Return to the main storage choices\n'
+  printf '\nNo root filesystem, logical volume, or existing partition will be shrunk or moved.\n'
+  if [[ -n $lvm_vg && $free_gib == 0 ]]; then
+    printf 'The 0 GiB physical result is expected on a fully partitioned Ubuntu LVM disk.\n'
+    printf 'K3sDeploy checked inside volume group %s separately; use choice 1 when it reports enough free space.\n' "$lvm_vg"
+  fi
+  if [[ $default_subchoice == 4 ]]; then
+    printf '\nNo safe separate space is currently available on the OS disk.\n'
+    printf 'Recommended actions:\n'
+    printf '  - Return and choose root storage only if K3sDeploy reports that root meets its thresholds.\n'
+    printf '  - In Proxmox, add a new empty virtual disk of suitable size, then choose storage option 3.\n'
+    printf '  - Expand storage manually, then rerun K3sDeploy; it will not shrink live filesystems for you.\n'
+  fi
+  read -r -p "Selection [$default_subchoice]: " subchoice; subchoice=${subchoice:-$default_subchoice}
+  case $subchoice in
+    1)
+      ((lvm_free_gib > LONGHORN_DATA_MIN_GIB)) || { warn 'The LVM choice is unavailable because there is not enough free space.'; return 1; }
+      plan_lvm_volume "$lvm_vg" "$lvm_free_bytes"
+      return
+      ;;
+    2)
+      ((free_gib > LONGHORN_DATA_MIN_GIB)) || { warn 'The physical-partition choice is unavailable because there is not enough unallocated disk space.'; return 1; }
+      ;;
+    3)
+      ((${#_existing_partitions[@]} > 0)) || { warn 'No eligible unused partition is available.'; return 1; }
+      choose_existing_partition "$root_disk"
+      return
+      ;;
+    4) return 1;;
+    *) warn 'Invalid OS-disk storage choice'; return 1;;
+  esac
   ((free_gib > LONGHORN_DATA_MIN_GIB)) || die "There is not enough unallocated space. At least ${LONGHORN_DATA_MIN_GIB} GiB plus 1 GiB safety margin is required."
   maximum_gib=$((free_gib-1)); recommended_gib=$maximum_gib
   printf '\nLargest unallocated region: %d GiB\n' "$free_gib"
@@ -321,6 +468,7 @@ apply_storage_plan(){
     root) as_root mkdir -p "$LONGHORN_PATH"; show_storage "$LONGHORN_PATH";;
     os-partition) format_existing_partition "$STORAGE_DEVICE";;
     os-new-partition) create_os_disk_partition;;
+    os-lvm) create_lvm_volume;;
     dedicated-disk) prepare_empty_disk "$STORAGE_DEVICE";;
     *) die "No valid Longhorn storage plan was selected";;
   esac
@@ -334,7 +482,8 @@ select_storage(){
   if ! capacity_meets_minimum "$root_gib" "$LONGHORN_ROOT_MIN_GIB" || ! capacity_meets_minimum "$available_gib" "$LONGHORN_ROOT_MIN_AVAILABLE_GIB"; then
     if [[ -n $root_disk ]]; then default_choice=2; else default_choice=3; fi
   fi
-  cat <<EOF
+  while true; do
+    cat <<EOF
 
 Longhorn storage
 
@@ -345,9 +494,9 @@ Detected OS disk:         ${root_disk:-unknown} (${root_disk_gib} GiB)
    Recommended only when root is at least ${LONGHORN_ROOT_MIN_GIB} GiB. Longhorn reserves
    ${LONGHORN_ROOT_RESERVED_PERCENT}% for OS headroom, but this is not a hard quota.
 
-2. Create or use a separate partition on the OS disk (guided)
-   The installer shows real unallocated space, recommends a size, and guides
-   you through creating the partition. It never shrinks or moves existing data.
+2. Create separate storage on the OS disk (guided partition or LVM)
+   The installer detects both physical unallocated space and free Ubuntu LVM
+   extents, recommends a size, and never shrinks or moves existing data.
 
 3. Use a separate physical disk (recommended for important data)
    Best isolation. The disk must be empty. ${LONGHORN_DATA_RECOMMENDED_GIB} GiB is recommended;
@@ -355,8 +504,14 @@ Detected OS disk:         ${root_disk:-unknown} (${root_disk_gib} GiB)
 
 All separate storage is mounted by UUID at $LONGHORN_STANDARD_PATH.
 EOF
-  read -r -p "Selection [$default_choice]: " choice; choice=${choice:-$default_choice}
-  case $choice in 1) select_root_storage;; 2) select_os_disk_partition;; 3) select_dedicated_disk;; *) die "Invalid storage selection";; esac
+    read -r -p "Selection [$default_choice]: " choice; choice=${choice:-$default_choice}
+    case $choice in
+      1) select_root_storage; return;;
+      2) if select_os_disk_partition; then return; fi;;
+      3) select_dedicated_disk; return;;
+      *) warn 'Invalid storage selection';;
+    esac
+  done
 }
 
 validate_storage_selection(){
@@ -364,7 +519,7 @@ validate_storage_selection(){
   [[ -d ${LONGHORN_PATH:-$LONGHORN_STANDARD_PATH} ]] || { report 'Longhorn storage path' MISSING 'not configured on this node'; return 1; }
   case ${STORAGE_MODE:-unknown} in
     root) report 'Longhorn storage path' OK 'shared root filesystem';;
-    os-partition|os-new-partition|dedicated-disk)
+    os-partition|os-new-partition|os-lvm|dedicated-disk)
       if ! findmnt -rn "$LONGHORN_PATH" >/dev/null; then report 'Longhorn storage mount' FAIL 'expected separate filesystem is not mounted'; return 1; fi
       actual_uuid=$(findmnt -no UUID "$LONGHORN_PATH" 2>/dev/null || true)
       if [[ -n ${LONGHORN_DEVICE_UUID:-} && $actual_uuid != "$LONGHORN_DEVICE_UUID" ]]; then report 'Longhorn storage UUID' FAIL 'mounted filesystem differs from installer state'; return 1; fi

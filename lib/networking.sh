@@ -3,7 +3,19 @@ detect_interface(){ ip -4 route show default 2>/dev/null | awk 'NR==1{print $5}'
 detect_node_ip(){ local dev=${1:-$(detect_interface)}; ip -4 -o addr show dev "$dev" scope global 2>/dev/null | awk 'NR==1{sub(/\/.*/,"",$4);print $4}'; }
 port_reachable(){ timeout 3 bash -c "</dev/tcp/$1/$2" 2>/dev/null; }
 local_ipv4_present(){ ip -4 -o addr show scope global | awk '{sub(/\/.*/,"",$4); print $4}' | grep -Fxq "$1"; }
-vip_conflict_check(){ local vip=$1 iface=$2; if command -v arping >/dev/null; then if arping -D -c 2 -I "$iface" "$vip" >/dev/null 2>&1; then ok "VIP $vip is currently unclaimed"; else warn "VIP $vip responds on $iface (expected for an existing cluster; investigate for a new cluster)"; fi; else warn "arping unavailable; could not test address ownership"; fi; }
+vip_conflict_check(){ local vip=$1 iface=$2; if command -v arping >/dev/null; then if as_root_capture arping -D -c 2 -I "$iface" "$vip" >/dev/null 2>&1; then ok "VIP $vip is currently unclaimed"; return 0; else warn "The ARP check could not prove that $vip is unused; it may already belong to another device."; return 1; fi; else warn "arping unavailable; could not test address ownership"; return 1; fi; }
+
+ensure_arping(){
+  command -v arping >/dev/null 2>&1 && return 0
+  info "The small Ubuntu package 'iputils-arping' is needed to check whether the proposed VIP is already in use."
+  if ! confirm_yes 'Install iputils-arping now?'; then
+    warn 'VIP ownership check skipped because arping was not installed.'
+    return 1
+  fi
+  as_root apt-get update
+  as_root apt-get install -y iputils-arping
+  command -v arping >/dev/null 2>&1 || die 'iputils-arping was installed, but the arping command is still unavailable.'
+}
 
 JOIN_CHECK_TEMP_DIR=
 cleanup_join_check(){

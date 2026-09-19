@@ -45,7 +45,7 @@ collect_local_identity(){
   local current_hostname
   current_hostname=$(short_hostname); current_hostname=${current_hostname,,}
   printf '\nDetected hostname: %s\n' "$current_hostname"
-  if confirm "Keep hostname '$current_hostname'?"; then
+  if confirm_yes "Keep hostname '$current_hostname'?"; then
     DESIRED_HOSTNAME=$current_hostname
   else
     prompt_required DESIRED_HOSTNAME 'Enter a unique lowercase hostname for this node'
@@ -55,7 +55,7 @@ collect_local_identity(){
   [[ -n $DETECTED_IP ]] || die 'No primary IPv4 address was detected. Configure networking, then rerun K3sDeploy.'
   printf '\nDetected node address: %s on interface %s\n' "$DETECTED_IP" "${PRIMARY_IFACE:-unknown}"
   info 'Every cluster node needs a stable address, normally provided by a DHCP reservation or static network configuration.'
-  if ! confirm "Use $DETECTED_IP as this node's permanent cluster address?"; then
+  if ! confirm_yes "Use $DETECTED_IP as this node's permanent cluster address?"; then
     die 'Configure the desired static address or DHCP reservation, restart networking (or reboot), and rerun K3sDeploy.'
   fi
   NODE_IP=$DETECTED_IP
@@ -73,8 +73,11 @@ collect_new_cluster_vip(){
   valid_ip_or_die 'API VIP' "$API_VIP"
   [[ $NODE_IP != "$API_VIP" ]] || die 'Node IP and API VIP must differ'
   same_subnet "$NODE_IP" "$API_VIP" 24 || warn 'VIP and node IP do not share a /24. Most kube-vip ARP networks require the same Layer-2 network.'
-  vip_conflict_check "$API_VIP" "$PRIMARY_IFACE"
-  confirm "I confirm $API_VIP is reserved and not assigned to another device" || die 'Reserve an unused VIP before creating the cluster.'
+  ensure_arping || true
+  if ! vip_conflict_check "$API_VIP" "$PRIMARY_IFACE"; then
+    confirm "Continue even though the automated check did not confirm that $API_VIP is unused?" || die 'Choose and reserve an unused VIP before creating the cluster.'
+  fi
+  confirm_yes "I confirm $API_VIP is reserved and not assigned to another device" || die 'Reserve an unused VIP before creating the cluster.'
 }
 
 collect_join_access(){
@@ -117,7 +120,7 @@ collect_metallb_pool(){
   (( $(ip_to_int "$POOL_START") <= $(ip_to_int "$POOL_END") )) || die 'MetalLB range is reversed'
   ip_in_range "$API_VIP" "$POOL_START" "$POOL_END" && die 'API VIP overlaps MetalLB pool'
   ip_in_range "$NODE_IP" "$POOL_START" "$POOL_END" && die 'Node IP overlaps MetalLB pool'
-  confirm 'I confirm this entire MetalLB range is unused and excluded from DHCP' || die 'Reserve the pool before continuing'
+  confirm_yes 'I confirm this entire MetalLB range is unused and excluded from DHCP' || die 'Reserve the pool before continuing'
 }
 persist_state(){ local body; body=$(printf 'NODE_ROLE=%s\nNODE_IP=%s\nAPI_VIP=%s\nSTORAGE_MODE=%s\nSTORAGE_DEVICE=%s\nLONGHORN_PATH=%s\nLONGHORN_DEVICE_UUID=%s\nMETALLB_MODE=l2\n' "${NODE_ROLE:-server}" "$NODE_IP" "$API_VIP" "$STORAGE_MODE" "${STORAGE_DEVICE:-}" "$LONGHORN_PATH" "${LONGHORN_DEVICE_UUID:-}"); write_root_file "$STATE_FILE" 600 "$body" || true; }
 set_hostname_if_needed(){ [[ $(short_hostname) == "$DESIRED_HOSTNAME" ]] && return; need_cmd hostnamectl; info "Changing this node hostname to $DESIRED_HOSTNAME as shown in the accepted plan"; as_root hostnamectl set-hostname "$DESIRED_HOSTNAME"; }

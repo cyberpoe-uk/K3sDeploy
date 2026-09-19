@@ -50,6 +50,7 @@ Each node needs one of the following:
 
 - An ext4 or XFS root filesystem of at least 120 GiB with at least 60 GiB currently free.
 - A GPT-formatted OS disk with at least 20 GiB plus alignment margin genuinely unallocated for a new Longhorn partition.
+- An Ubuntu LVM volume group containing at least 20 GiB plus a 1 GiB safety margin in free extents.
 - An empty separate physical disk of at least 20 GiB.
 
 Longhorn and K3s do not define one universal capacity minimum because the correct size depends on PVC sizes, replicas, snapshots, backups, and expected growth. K3sDeploy uses 20 GiB as a small-lab installation floor and recommends planning at least 100 GiB per storage node for general use. These are project guardrails, not upstream guarantees. Change them deliberately in `config/defaults.env` when your capacity plan requires different values.
@@ -204,22 +205,35 @@ Over-provisioning:               100%
 
 The 30% reservation is a Longhorn scheduling rule, not a filesystem quota. The operating system and Longhorn still consume the same real free space. Use a separate partition or disk when a hard capacity boundary is required.
 
-### Option 2: new or existing partition on the OS disk
+### Option 2: separate storage on the OS disk (LVM or partition)
 
-The installer can guide creation of a Longhorn partition without resizing existing filesystems:
+The installer can guide creation of separate Longhorn storage without resizing existing filesystems. It understands both ordinary partition layouts and the LVM layout created by Ubuntu Server's default guided installation.
 
-1. It identifies the physical OS disk and requires a GPT partition table.
-2. It reads the partition table and finds the largest genuinely unallocated region.
-3. It reports the available GiB and recommends using the region minus approximately 1 GiB for alignment and recovery margin.
-4. It asks for the desired whole-number partition size, with a 20 GiB small-lab floor and a warning below the 100 GiB general-use recommendation.
-5. It records the plan but changes nothing until the complete installation summary is accepted.
-6. It rechecks that the same byte range is still unallocated.
-7. It requires the operator to type an exact `CREATE ... ON /dev/...` confirmation.
-8. It creates only the new partition, formats it as ext4 with label `longhorn-data`, and mounts it by UUID.
+Seeing a smaller root filesystem and a larger OS disk is not an error. For example, a 120 GiB Proxmox virtual disk may contain a 59 GiB root logical volume while the rest remains free inside the LVM volume group. That space is not visible to `parted` as unallocated disk space, so K3sDeploy checks both layers separately.
+
+For an LVM-based root, the installer:
+
+1. Identifies the root volume group and reports its genuinely free extents.
+2. Confirms that the existing root allocation is approximately 30% or more of the OS disk and still has at least 15 GiB available.
+3. Recommends a Longhorn logical-volume size while leaving approximately 1 GiB free in the volume group.
+4. Shows the complete plan and requires an exact `CREATE ... LV ON ...` confirmation.
+5. Creates a new logical volume without shrinking or changing the existing root volume.
+6. Formats it as ext4 and mounts it by UUID at `/var/lib/longhorn`.
+
+For a non-LVM layout with physical unallocated space, the installer:
+
+1. Identifies the physical OS disk and requires a GPT partition table.
+2. Reads the partition table and finds the largest genuinely unallocated region.
+3. Reports the available GiB and recommends using the region minus approximately 1 GiB for alignment and recovery margin.
+4. Asks for the desired whole-number partition size, with a 20 GiB small-lab floor and a warning below the 100 GiB general-use recommendation.
+5. Records the plan but changes nothing until the complete installation summary is accepted.
+6. Rechecks that the same byte range is still unallocated.
+7. Requires the operator to type an exact `CREATE ... ON /dev/...` confirmation.
+8. Creates only the new partition, formats it as ext4 with label `longhorn-data`, and mounts it by UUID.
 
 If the standard `parted` utility is missing, the installer explains why it is needed and asks before installing the Ubuntu package. Installing that utility does not alter the partition table.
 
-The installer never shrinks, moves, or reformats an existing OS partition. If no unallocated region exists, create space using an appropriate offline/rescue workflow or choose a separate disk. An already-created empty partition of at least 20 GiB can also be selected from a numbered list.
+The installer never shrinks, moves, or reformats an existing root filesystem, logical volume, or OS partition. If neither LVM free extents nor physical unallocated space exists, it recommends returning to root storage when eligible or adding an empty virtual/physical disk. An already-created empty partition of at least 20 GiB can also be selected from a numbered list.
 
 If partition creation succeeds but Linux cannot expose the new device immediately, the installer stops with recovery instructions. Reboot and rerun; the empty partition will be offered as an existing candidate instead of creating another blindly.
 

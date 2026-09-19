@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Default-Yes confirmations for detected hostname/address, network reservations, and safe dependency or service operations; destructive and risk-acceptance prompts remain default-No.
+- Optional installation of Ubuntu's `iputils-arping` package before checking whether a new API VIP is already in use.
+- Guided creation of a dedicated Longhorn LVM logical volume from free extents in default Ubuntu/Proxmox layouts, with root-headroom checks and exact confirmation.
 - Clean-node validation now reports uninstalled components as `MISSING` or `SKIP`, and safe repair no longer offers to start a nonexistent K3s service.
 - Manager and worker joins verify the existing API VIP and secure join token before collecting local storage choices.
 - Removed hardcoded lab network addresses; hostname and detected node-address confirmations now include beginner-facing guidance.

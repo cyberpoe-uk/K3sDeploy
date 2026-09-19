@@ -75,14 +75,14 @@ safe_repair(){
   local service=
   if systemd_unit_exists k3s; then service=k3s; elif systemd_unit_exists k3s-agent; then service=k3s-agent; fi
   if [[ -n $service ]]; then
-    systemctl is-active --quiet "$service" 2>/dev/null || { confirm "Start inactive $service service?" && as_root systemctl start "$service"; }
+    systemctl is-active --quiet "$service" 2>/dev/null || { confirm_yes "Start inactive $service service?" && as_root systemctl start "$service"; }
   else
     warn 'K3s files were detected, but no k3s or k3s-agent service unit exists. Automatic repair is not safe; review the installation log or reinstall deliberately.'
     validate_cluster
     return 0
   fi
-  command -v iscsiadm >/dev/null || { confirm 'Install missing open-iscsi?' && ensure_iscsi; }
-  systemctl is-active --quiet iscsid 2>/dev/null || { confirm 'Enable/start iscsid?' && as_root systemctl enable --now iscsid; }
+  command -v iscsiadm >/dev/null || { confirm_yes 'Install missing open-iscsi?' && ensure_iscsi; }
+  systemctl is-active --quiet iscsid 2>/dev/null || { confirm_yes 'Enable/start iscsid?' && as_root systemctl enable --now iscsid; }
   [[ ! -f $CONFIG_FILE ]] || warn "Configuration reconciliation requires desired values and explicit confirmation; no automatic cluster-identity changes are made."
   validate_cluster
 }

@@ -15,6 +15,7 @@ info(){ log INFO 36 "$*"; }; ok(){ log OK 32 "$*"; }; warn(){ log WARN 33 "$*"; 
 die(){ error "$*"; exit 1; }
 on_error(){ local rc=$? line=$1; error "Failed at line $line (exit $rc). Log: $LOG_FILE"; exit "$rc"; }
 confirm(){ local prompt=${1:-Proceed?}; $ASSUME_YES && return 0; read -r -p "$prompt [y/N] " reply; [[ $reply =~ ^[Yy]([Ee][Ss])?$ ]]; }
+confirm_yes(){ local prompt=${1:-Continue?}; $ASSUME_YES && return 0; read -r -p "$prompt [Y/n] " reply; [[ -z $reply || $reply =~ ^[Yy]([Ee][Ss])?$ ]]; }
 need_cmd(){ command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
 require_privileges(){
   [[ $EUID -eq 0 ]] && { info "Running as root; no sudo authentication is needed"; ensure_log; return; }

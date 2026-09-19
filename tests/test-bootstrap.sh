@@ -47,7 +47,7 @@ sudo() {
     return 97
 }
 
-for response in '' 'n' 'invalid'; do
+for response in 'n' 'invalid'; do
     output=$(ensure_git_dependency <<< "$response" 2>&1) && status=0 || status=$?
     if [[ $status -eq 0 ]]; then
         printf 'FAIL expected declined Git installation to return non-zero\n'
@@ -72,6 +72,7 @@ sudo() {
     esac
 }
 assert_ok ensure_git_dependency <<< 'yes'
+assert_ok ensure_git_dependency <<< ''
 
 git() {
     printf '%s\n' \
