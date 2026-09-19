@@ -9,6 +9,57 @@ STATE_FILE=${STATE_FILE:-/etc/k3s-bootstrap/config}
 CONFIG_FILE=${CONFIG_FILE:-/etc/rancher/k3s/config.yaml}
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
+detect_operating_system(){
+  local ID=unknown ID_LIKE= PRETTY_NAME='Unknown Linux' VERSION_ID=unknown
+  if [[ -r /etc/os-release ]]; then
+    # Values are provided by the operating system using shell-compatible syntax.
+    # shellcheck disable=SC1091
+    source /etc/os-release
+  fi
+  OS_ID=${ID:-unknown}
+  OS_ID_LIKE=${ID_LIKE:-}
+  OS_NAME=${PRETTY_NAME:-${NAME:-Unknown Linux}}
+  OS_VERSION_ID=${VERSION_ID:-unknown}
+  if command -v apt-get >/dev/null 2>&1; then OS_PACKAGE_MANAGER=apt
+  elif command -v dnf >/dev/null 2>&1; then OS_PACKAGE_MANAGER=dnf
+  elif command -v yum >/dev/null 2>&1; then OS_PACKAGE_MANAGER=yum
+  elif command -v zypper >/dev/null 2>&1; then OS_PACKAGE_MANAGER=zypper
+  else OS_PACKAGE_MANAGER=unsupported
+  fi
+  export OS_ID OS_ID_LIKE OS_NAME OS_VERSION_ID OS_PACKAGE_MANAGER
+}
+
+package_refresh(){
+  case ${OS_PACKAGE_MANAGER:-unsupported} in
+    apt) as_root apt-get update;;
+    dnf) as_root dnf -y makecache;;
+    yum) as_root yum -y makecache;;
+    zypper) as_root zypper --non-interactive refresh;;
+    *) die "Automatic package installation is not supported on ${OS_NAME:-this operating system}. Install the requested dependency manually, then retry.";;
+  esac
+}
+
+package_install(){
+  (($#)) || return 0
+  case ${OS_PACKAGE_MANAGER:-unsupported} in
+    apt) as_root apt-get install -y "$@";;
+    dnf) as_root dnf install -y "$@";;
+    yum) as_root yum install -y "$@";;
+    zypper) as_root zypper --non-interactive install --auto-agree-with-licenses "$@";;
+    *) die "Automatic package installation is not supported on ${OS_NAME:-this operating system}. Install these packages manually: $*";;
+  esac
+}
+
+package_for(){
+  case $1:${OS_PACKAGE_MANAGER:-unsupported} in
+    arping:apt) printf 'iputils-arping\n';;
+    arping:dnf|arping:yum|arping:zypper) printf 'iputils\n';;
+    iscsi:dnf|iscsi:yum) printf 'iscsi-initiator-utils\n';;
+    iscsi:apt|iscsi:zypper) printf 'open-iscsi\n';;
+    *) return 1;;
+  esac
+}
+
 colour() { [[ -t 1 ]] && printf '\033[%sm' "$1" || true; }
 log() { local level=$1 colour_code=$2; shift 2; printf '%s[%s] %-6s%s %s\n' "$(colour "$colour_code")" "$(date '+%F %T')" "$level" "$(colour 0)" "$*"; [[ -w ${LOG_FILE%/*} ]] && printf '[%s] %-6s %s\n' "$(date '+%F %T')" "$level" "$*" >>"$LOG_FILE" || true; }
 info(){ log INFO 36 "$*"; }; ok(){ log OK 32 "$*"; }; warn(){ log WARN 33 "$*"; }; error(){ log ERROR 31 "$*"; }; skip(){ log SKIP 34 "$*"; }; change(){ log CHANGE 35 "$*"; }
@@ -31,7 +82,7 @@ phase(){
   printf -v bar '%*s' "$filled" ''; bar=${bar// /#}
   printf -v empty_bar '%*s' "$empty" ''; bar+="${empty_bar// /-}"
   printf '\n+----------------------------------------------------------+\n'
-  printf '| K3s Bootstrap %-8s  [%s] %2d/%-2d |\n' "$VERSION" "$bar" "$current" "$total"
+  printf '| K3sDeploy %-14s[%s] %2d/%-2d |\n' "$VERSION" "$bar" "$current" "$total"
   printf '| %-56s |\n' "$title"
   printf '+----------------------------------------------------------+\n'
 }
@@ -60,8 +111,11 @@ same_subnet(){ local a=$1 b=$2 prefix=${3:-24}; (( prefix == 24 )) && [[ ${a%.*}
 prompt_default(){ local var=$1 prompt=$2 default=$3 value; read -r -p "$prompt [$default]: " value; printf -v "$var" '%s' "${value:-$default}"; }
 prompt_required(){
   local var=$1 prompt=$2 value
-  read -r -p "$prompt: " value
-  [[ -n $value ]] || die "$prompt cannot be empty"
+  while true; do
+    read -r -p "$prompt: " value
+    [[ -n $value ]] && break
+    warn "$prompt cannot be empty; please try again."
+  done
   printf -v "$var" '%s' "$value"
 }
 ensure_log(){ if [[ $EUID -eq 0 ]]; then mkdir -p "${LOG_FILE%/*}"; touch "$LOG_FILE"; chmod 600 "$LOG_FILE"; elif sudo -n true 2>/dev/null; then sudo mkdir -p "${LOG_FILE%/*}"; sudo touch "$LOG_FILE"; sudo chmod 600 "$LOG_FILE"; fi; }

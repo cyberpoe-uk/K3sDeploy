@@ -11,6 +11,13 @@ assert_ok validate_ipv4 0.0.0.0
 assert_bad validate_ipv4 256.1.1.1
 assert_bad validate_ipv4 10.1.2
 assert_bad validate_ipv4 01.2.3.4
+OS_PACKAGE_MANAGER=apt
+assert_eq "$(package_for arping)" iputils-arping
+assert_eq "$(package_for iscsi)" open-iscsi
+OS_PACKAGE_MANAGER=dnf
+assert_eq "$(package_for arping)" iputils
+assert_eq "$(package_for iscsi)" iscsi-initiator-utils
+OS_PACKAGE_MANAGER=apt
 assert_ok confirm_yes <<< ''
 assert_ok confirm_yes <<< 'yes'
 assert_bad confirm_yes <<< 'n'

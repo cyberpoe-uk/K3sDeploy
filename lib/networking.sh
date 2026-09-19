@@ -35,15 +35,17 @@ vip_conflict_check(){
 }
 
 ensure_arping(){
+  local package
   command -v arping >/dev/null 2>&1 && return 0
-  info "The small Ubuntu package 'iputils-arping' is needed to check whether the proposed VIP is already in use."
-  if ! confirm_yes 'Install iputils-arping now?'; then
+  package=$(package_for arping) || die "K3sDeploy does not know the arping package name for $OS_NAME. Install arping manually, then retry."
+  info "The '$package' package for $OS_NAME is needed to check whether the proposed VIP is already in use."
+  if ! confirm_yes "Install $package now?"; then
     warn 'VIP ownership check skipped because arping was not installed.'
     return 1
   fi
-  as_root apt-get update
-  as_root apt-get install -y iputils-arping
-  command -v arping >/dev/null 2>&1 || die 'iputils-arping was installed, but the arping command is still unavailable.'
+  package_refresh
+  package_install "$package"
+  command -v arping >/dev/null 2>&1 || die "$package was installed, but the arping command is still unavailable."
 }
 
 JOIN_CHECK_TEMP_DIR=
@@ -87,13 +89,15 @@ verify_existing_cluster_token(){
   local temp_dir ca_file curl_config actual_hash escaped_user escaped_password
 
   if [[ ! $token =~ ^K10([a-fA-F0-9]{64})::([^:]+):(.+)$ ]]; then
-    die "Use the full secure token beginning with K10. Copy it from /var/lib/rancher/k3s/server/token on an existing manager."
+    warn "Use the full secure token beginning with K10. Copy it from /var/lib/rancher/k3s/server/token on an existing manager."
+    return 1
   fi
   expected_hash=${BASH_REMATCH[1],,}
   token_user=${BASH_REMATCH[2]}
   token_password=${BASH_REMATCH[3]}
   if [[ $role == server && $token_user != server ]]; then
-    die "This is not a K3s server token. A manager must use /var/lib/rancher/k3s/server/token from an existing manager."
+    warn "This is not a K3s server token. A manager must use /var/lib/rancher/k3s/server/token from an existing manager."
+    return 1
   fi
 
   temp_dir=$(mktemp -d /tmp/k3sdeploy-join-check-XXXXXX)
@@ -105,12 +109,14 @@ verify_existing_cluster_token(){
   if ! curl --fail --silent --show-error --insecure --connect-timeout 3 --max-time 10 \
       "https://$API_VIP:6443/cacerts" --output "$ca_file"; then
     cleanup_join_check
-    die "A K3s manager could not be reached at $API_VIP:6443. Create the first manager with option 1, or check the VIP and network."
+    warn "A K3s manager could not be reached at $API_VIP:6443. Check the existing cluster VIP and network."
+    return 1
   fi
   actual_hash=$(k3s_ca_hash "$ca_file" || true)
   if [[ -z $actual_hash || $actual_hash != "$expected_hash" ]]; then
     cleanup_join_check
-    die "The token does not match the K3s cluster CA at $API_VIP. Check that you entered the existing cluster's VIP and full token."
+    warn "The token does not match the K3s cluster CA at $API_VIP. Check that you entered the existing cluster's VIP and full token."
+    return 1
   fi
 
   endpoint=/v1-k3s/config
@@ -124,9 +130,11 @@ verify_existing_cluster_token(){
       --connect-timeout 3 --max-time 15 "https://$API_VIP:6443$endpoint" --output /dev/null; then
     cleanup_join_check
     if [[ $role == server ]]; then
-      die "The manager rejected this server token. Copy /var/lib/rancher/k3s/server/token from a healthy manager and try again."
+      warn "The manager rejected this server token. Copy /var/lib/rancher/k3s/server/token from a healthy manager and try again."
+      return 1
     fi
-    die "The cluster rejected this join token. Copy a current server or agent token from a healthy manager and try again."
+    warn "The cluster rejected this join token. Copy a current server or agent token from a healthy manager and try again."
+    return 1
   fi
   cleanup_join_check
   ok "Existing K3s cluster and join token verified at $API_VIP:6443"

@@ -36,7 +36,9 @@ report_fresh_node(){
 }
 
 validate_cluster(){
-  printf '\nHealth report\n'; check OS grep -qi ubuntu /etc/os-release || true; check Network ip route get 1.1.1.1 || true
+  printf '\nHealth report\n'
+  if [[ -r /etc/os-release && ${OS_PACKAGE_MANAGER:-unsupported} != unsupported ]]; then report 'Operating system' OK "${OS_NAME:-Linux} ($OS_PACKAGE_MANAGER)"; else report 'Operating system' FAIL 'unsupported or not detected'; fi
+  check Network ip route get 1.1.1.1 || true
   if ! k3s_local_installation_present; then
     report_fresh_node
     printf '\nThis is a clean node. Choose option 1 to create the first manager, option 2 to join a manager, or option 3 to join a worker.\n'

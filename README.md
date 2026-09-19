@@ -1,6 +1,6 @@
 # K3sDeploy
 
-K3sDeploy is an interactive Ubuntu Server installer for building and maintaining a small highly available K3s cluster. It guides the operator through networking, node roles, API high availability, application load balancers, ingress, and persistent storage without requiring prior Kubernetes installation experience.
+K3sDeploy is an interactive Linux installer for building and maintaining a small highly available K3s cluster. It guides the operator through networking, node roles, API high availability, application load balancers, ingress, and persistent storage without requiring prior Kubernetes installation experience.
 
 The project favors visible checks and explicit confirmation over unattended destructive changes. It does not reset clusters, erase unidentified disks, retrieve tokens from remote machines, or silently replace existing cluster configuration.
 
@@ -24,7 +24,7 @@ Prepare every node before running the installer.
 
 ### Operating system and access
 
-- Ubuntu Server with systemd. Ubuntu Server 24.04 LTS is the primary tested target.
+- A systemd-based Linux distribution using `apt`, `dnf`, `yum`, or `zypper`. Ubuntu Server 24.04 LTS is the primary tested target; verify a non-Ubuntu distribution in a disposable node before production use.
 - `amd64`/`x86_64` or `arm64`/`aarch64` CPU architecture.
 - A normal user account with `sudo` access.
 - A unique lowercase hostname for every node.
@@ -50,7 +50,7 @@ Each node needs one of the following:
 
 - An ext4 or XFS root filesystem of at least 120 GiB with at least 60 GiB currently free.
 - A GPT-formatted OS disk with at least 20 GiB plus alignment margin genuinely unallocated for a new Longhorn partition.
-- An Ubuntu LVM volume group containing at least 20 GiB plus a 1 GiB safety margin in free extents.
+- A Linux LVM volume group containing at least 20 GiB plus a 1 GiB safety margin in free extents.
 - An empty separate physical or virtual disk of at least 20 GiB.
 
 Longhorn and K3s do not define one universal capacity minimum because the correct size depends on PVC sizes, replicas, snapshots, backups, and expected growth. K3sDeploy uses 20 GiB as a small-lab installation floor and recommends planning at least 100 GiB per storage node for general use. These are project guardrails, not upstream guarantees. Change them deliberately in `config/defaults.env` when your capacity plan requires different values.
@@ -84,7 +84,7 @@ Two etcd members do not tolerate the loss of either member. Complete the third h
 
 ## Get K3sDeploy
 
-Run K3sDeploy directly on each Ubuntu node, one node at a time. Do not install it on a separate administration machine and do not copy one node's generated K3s configuration to another node.
+Run K3sDeploy directly on each cluster node, one node at a time. Do not install it on a separate administration machine and do not copy one node's generated K3s configuration to another node.
 
 Run every command in this section as your normal login user, without putting `sudo` in front of it. K3sDeploy asks for your sudo password when a privileged change is actually required.
 
@@ -93,8 +93,16 @@ Run every command in this section as your normal login user, without putting `su
 Cloning leaves a local copy that you can inspect, rerun for validation, and use later for safe repair:
 
 ```bash
+# Debian or Ubuntu
 sudo apt-get update
 sudo apt-get install -y git
+
+# Fedora, RHEL, Rocky Linux, AlmaLinux, or another dnf system
+sudo dnf install -y git
+
+# SUSE or openSUSE
+sudo zypper install git
+
 git clone https://github.com/cyberpoe-uk/K3sDeploy.git
 cd K3sDeploy
 ./k3s-bootstrap.sh
@@ -114,11 +122,18 @@ Replace `v0.1.0` with the release you have reviewed and want to deploy. Use the 
 
 The public launcher finds the highest stable semantic-version tag, downloads that release into a temporary directory, verifies that its tag matches the `VERSION` file, and opens the same interactive menu:
 
-Install `curl` first if your minimal Ubuntu image does not include it:
+Install `curl` first if the operating system image does not include it:
 
 ```bash
+# Debian or Ubuntu
 sudo apt-get update
 sudo apt-get install -y curl
+
+# dnf-based systems
+sudo dnf install -y curl
+
+# SUSE or openSUSE
+sudo zypper install curl
 ```
 
 ```bash
@@ -169,7 +184,9 @@ The menu provides:
 7. Exit
 ```
 
-If K3s is already present, the installer displays a warning before the menu. Fresh-create and fresh-join operations are then blocked before asking for a token or making storage changes. This protects operators who accidentally run the script on an existing node.
+If K3s is already present, the installer displays a warning before the menu. Fresh-create and fresh-join operations are then blocked before asking for a token or making storage changes. This protects operators who accidentally run the installer on an existing node.
+
+Input mistakes are recoverable. Invalid addresses, occupied VIPs, rejected join tokens, invalid MetalLB ranges, and unavailable storage choices return to the relevant prompt or installer menu. A workflow still stops immediately when continuing could damage existing data or compound a partial installation; the main installer remains open so the operator can review the message, correct the condition, and choose an option again.
 
 ## Creating a new cluster
 
@@ -185,7 +202,7 @@ Run option 1 on the first manager. The installer:
 
 Run option 2 on manager two and manager three, one at a time. Enter the exact API VIP created by option 1 and paste the full secure server token from `sudo cat /var/lib/rancher/k3s/server/token` on a healthy manager. Before collecting hostname or storage choices, K3sDeploy verifies the cluster CA and authenticates against the existing manager. The token is never echoed or written to the general installer state file.
 
-Run option 3 on remaining workers. Cluster-wide components are not reinstalled; the script prepares local prerequisites and waits until the worker is registered and Ready.
+Run option 3 on remaining workers. Cluster-wide components are not reinstalled; the installer prepares local prerequisites and waits until the worker is registered and Ready.
 
 ## Longhorn storage choices
 
@@ -209,9 +226,9 @@ The 30% reservation is a Longhorn scheduling rule, not a filesystem quota. The o
 
 ### Option 2: separate storage on the OS disk (LVM or partition)
 
-The installer can guide creation of separate Longhorn storage without resizing existing filesystems. It understands both ordinary partition layouts and the LVM layout created by Ubuntu Server's default guided installation.
+The installer can guide creation of separate Longhorn storage without resizing existing filesystems. It understands both ordinary partition layouts and common Linux LVM layouts.
 
-Seeing a smaller root filesystem and a larger OS disk is not an error. For example, Ubuntu may place a 59 GiB root logical volume on a 120 GiB physical or virtual disk while the rest remains free inside the LVM volume group. That space is not visible to `parted` as unallocated disk space, so K3sDeploy checks both layers separately.
+Seeing a smaller root filesystem and a larger OS disk is not an error. For example, a Linux installer may place a 59 GiB root logical volume on a 120 GiB physical or virtual disk while the rest remains free inside the LVM volume group. That space is not visible to `parted` as unallocated disk space, so K3sDeploy checks both layers separately.
 
 If `lsblk` already reports the intended virtual-disk size, the guest can see that capacity. Hypervisor thin or thick provisioning does not explain a smaller root logical volume; the unused capacity may simply be free inside LVM. Check it with `sudo vgs` and `sudo lvs`. In that layout, option 2 creates separate Longhorn storage from the free extents without expanding or shrinking root.
 
@@ -235,7 +252,7 @@ For a non-LVM layout with physical unallocated space, the installer:
 7. Requires the operator to type an exact `CREATE ... ON /dev/...` confirmation.
 8. Creates only the new partition, formats it as ext4 with label `longhorn-data`, and mounts it by UUID.
 
-If the standard `parted` utility is missing, the installer explains why it is needed and asks before installing the Ubuntu package. Installing that utility does not alter the partition table.
+If the standard `parted` utility is missing, the installer explains why it is needed and asks before installing the distribution package. Installing that utility does not alter the partition table.
 
 The installer never shrinks, moves, or reformats an existing root filesystem, logical volume, or OS partition. If neither LVM free extents nor physical unallocated space exists, it recommends returning to root storage when eligible or adding an empty virtual/physical disk. An already-created empty partition of at least 20 GiB can also be selected from a numbered list.
 
@@ -320,6 +337,7 @@ Static and unit checks:
 shellcheck k3sdeploy-latest.sh k3s-bootstrap.sh lib/*.sh tests/*.sh
 bash tests/test-bootstrap.sh
 bash tests/test-functions.sh
+bash tests/test-interaction.sh
 ```
 
 The optional `tests/smoke-longhorn.sh` test creates a small PVC, writes a unique value, removes the writer pod, reattaches the claim, and verifies the same value. Run it only after the cluster is healthy. A retained PV may require deliberate administrative cleanup because the StorageClass reclaim policy is `Retain`.

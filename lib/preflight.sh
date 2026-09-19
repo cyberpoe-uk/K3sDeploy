@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 preflight_collect(){
-  OS_NAME=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/,"",$2);print $2}' /etc/os-release 2>/dev/null || echo unknown)
+  detect_operating_system
   HOST_NOW=$(short_hostname)
   PRIMARY_IFACE=$(detect_interface || true)
   DETECTED_IP=$(detect_node_ip "$PRIMARY_IFACE" || true)
@@ -15,7 +15,7 @@ preflight_collect(){
   TIME_SYNC=unknown; command -v timedatectl >/dev/null && TIME_SYNC=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo unknown)
 }
 basic_host_sanity(){
-  [[ $OS_NAME == *Ubuntu* ]] || die "This release supports Ubuntu Server only; detected: $OS_NAME"
+  [[ $OS_PACKAGE_MANAGER != unsupported ]] || die "K3sDeploy detected $OS_NAME, but does not yet support its package manager. Supported package managers: apt, dnf, yum, and zypper."
   [[ $(uname -m) == x86_64 || $(uname -m) == aarch64 || $(uname -m) == arm64 ]] || die "Unsupported CPU architecture: $(uname -m)"
   need_cmd ip; need_cmd systemctl; need_cmd curl
 }
@@ -27,6 +27,7 @@ Preflight summary
   Interface:         $PRIMARY_IFACE
   Default route:     $DEFAULT_ROUTE
   OS:                $OS_NAME
+  Package manager:   $OS_PACKAGE_MANAGER
   Architecture:      $(uname -m)
   CPU / RAM:         $CPU_COUNT CPUs / $RAM_GIB GiB
   Kernel:            $KERNEL_VERSION

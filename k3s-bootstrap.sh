@@ -29,7 +29,7 @@ trap 'on_error $LINENO' ERR
 trap cleanup_join_check EXIT
 
 usage(){ cat <<EOF
-K3s Bootstrap $VERSION
+K3sDeploy Installer $VERSION
 Usage: ./k3s-bootstrap.sh [--dry-run] [--verbose] [--yes] [--help] [--version]
 
 Interactive modes: create first manager, join manager, join worker, promote worker, validate, safe repair.
@@ -41,6 +41,25 @@ EOF
 parse_args(){ while (($#)); do case $1 in --dry-run) DRY_RUN=true;; --verbose) VERBOSE=true;; --yes) ASSUME_YES=true;; --help|-h) usage; exit;; --version) echo "$VERSION"; exit;; *) die "Unknown option: $1";; esac; shift; done; }
 valid_ip_or_die(){ validate_ipv4 "$2" || die "$1 is not a valid IPv4 address: $2"; }
 valid_hostname_or_die(){ [[ ${#1} -le 253 && $1 =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && $1 != *..* ]] || die "Invalid hostname '$1'. Use lowercase letters, numbers, dots or hyphens."; }
+prompt_ipv4(){
+  local var=$1 prompt=$2 value
+  while true; do
+    read -r -p "$prompt: " value
+    if [[ -z $value ]]; then warn "$prompt cannot be empty; please try again."; continue; fi
+    if validate_ipv4 "$value"; then printf -v "$var" '%s' "$value"; return; fi
+    warn "'$value' is not a valid IPv4 address; please try again."
+  done
+}
+prompt_hostname(){
+  local var=$1 prompt=$2 value
+  while true; do
+    read -r -p "$prompt: " value
+    if [[ -z $value ]]; then warn "$prompt cannot be empty; please try again."; continue; fi
+    value=${value,,}
+    if [[ ${#value} -le 253 && $value =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && $value != *..* ]]; then printf -v "$var" '%s' "$value"; return; fi
+    warn "'$value' is not valid. Use lowercase letters, numbers, dots or hyphens; please try again."
+  done
+}
 collect_local_identity(){
   local current_hostname
   current_hostname=$(short_hostname); current_hostname=${current_hostname,,}
@@ -48,9 +67,12 @@ collect_local_identity(){
   if confirm_yes "Keep hostname '$current_hostname'?"; then
     DESIRED_HOSTNAME=$current_hostname
   else
-    prompt_required DESIRED_HOSTNAME 'Enter a unique lowercase hostname for this node'
+    prompt_hostname DESIRED_HOSTNAME 'Enter a unique lowercase hostname for this node'
   fi
-  valid_hostname_or_die "$DESIRED_HOSTNAME"
+  if ! [[ ${#DESIRED_HOSTNAME} -le 253 && $DESIRED_HOSTNAME =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && $DESIRED_HOSTNAME != *..* ]]; then
+    warn "The detected hostname '$DESIRED_HOSTNAME' is not valid for K3s. Choose a replacement."
+    prompt_hostname DESIRED_HOSTNAME 'Enter a unique lowercase hostname for this node'
+  fi
 
   [[ -n $DETECTED_IP ]] || die 'No primary IPv4 address was detected. Configure networking, then rerun K3sDeploy.'
   printf '\nDetected node address: %s on interface %s\n' "$DETECTED_IP" "${PRIMARY_IFACE:-unknown}"
@@ -69,18 +91,27 @@ collect_new_cluster_vip(){
     'Choose it from the same Layer-2 network/VLAN as the manager addresses.' \
     'Reserve it outside DHCP. Do not assign it to a VM, router, or other device.' \
     'Example only: if this node is 192.168.10.21/24, an unused reserved address such as 192.168.10.20 could be suitable.'
-  prompt_required API_VIP 'Enter the unused API VIP for this new cluster'
-  valid_ip_or_die 'API VIP' "$API_VIP"
-  [[ $NODE_IP != "$API_VIP" ]] || die 'Node IP and API VIP must differ'
-  same_subnet "$NODE_IP" "$API_VIP" 24 || warn 'VIP and node IP do not share a /24. Most kube-vip ARP networks require the same Layer-2 network.'
   ensure_arping || true
-  if ! vip_conflict_check "$API_VIP" "$PRIMARY_IFACE"; then
-    if [[ $VIP_CHECK_RESULT == occupied ]]; then
-      die "Choose a different unused VIP. $API_VIP answered a network ownership probe; K3sDeploy will not claim it."
+  while true; do
+    prompt_ipv4 API_VIP 'Enter the unused API VIP for this new cluster'
+    if [[ $NODE_IP == "$API_VIP" ]]; then
+      warn 'Node IP and API VIP must differ; enter another address.'
+      continue
     fi
-    confirm "Continue even though the automated checks could not confirm that $API_VIP is unused?" || die 'Choose and reserve an unused VIP before creating the cluster.'
-  fi
-  confirm_yes "I confirm $API_VIP is reserved and not assigned to another device" || die 'Reserve an unused VIP before creating the cluster.'
+    if ! same_subnet "$NODE_IP" "$API_VIP" 24; then
+      warn 'VIP and node IP do not share a /24. Most kube-vip ARP networks require the same Layer-2 network.'
+      confirm 'Use this different-subnet VIP anyway?' || { info 'Enter another VIP on the manager network.'; continue; }
+    fi
+    if ! vip_conflict_check "$API_VIP" "$PRIMARY_IFACE"; then
+      if [[ $VIP_CHECK_RESULT == occupied ]]; then
+        warn "$API_VIP answered a network ownership probe and will not be used. Enter another VIP."
+        continue
+      fi
+      confirm "Continue even though the automated checks could not confirm that $API_VIP is unused?" || { info 'Enter another reserved VIP.'; continue; }
+    fi
+    confirm_yes "I confirm $API_VIP is reserved and not assigned to another device" && return
+    info 'Reserve the address or enter another VIP.'
+  done
 }
 
 collect_join_access(){
@@ -89,10 +120,7 @@ collect_join_access(){
   printf '%s\n' \
     'Enter the exact Kubernetes API VIP created on the first manager.' \
     'Do not enter this new node address or the address of only one manager.' \
-    'The script will verify the existing cluster and token before asking about storage.'
-  prompt_required API_VIP 'Existing cluster API VIP'
-  valid_ip_or_die 'API VIP' "$API_VIP"
-  port_reachable "$API_VIP" 6443 || die "No K3s API answered at $API_VIP:6443. Create the first manager with option 1, or check the VIP and network."
+    'The installer will verify the existing cluster and token before asking about storage.'
   token_label='K3s join token from a healthy manager (input hidden)'
   if [[ $role == server ]]; then
     token_label='K3s SERVER token from /var/lib/rancher/k3s/server/token (input hidden)'
@@ -100,11 +128,20 @@ collect_join_access(){
   else
     info 'On a healthy manager, retrieve it with: sudo cat /var/lib/rancher/k3s/server/agent-token'
   fi
-  printf '%s: ' "$token_label"
-  read -rs JOIN_TOKEN
-  echo
-  [[ -n $JOIN_TOKEN ]] || die 'Join token cannot be empty. No local changes were made.'
-  verify_existing_cluster_token "$role" "$JOIN_TOKEN"
+  while true; do
+    prompt_ipv4 API_VIP 'Existing cluster API VIP'
+    if ! port_reachable "$API_VIP" 6443; then
+      warn "No K3s API answered at $API_VIP:6443. Check the existing VIP and network, then try again."
+      continue
+    fi
+    printf '%s: ' "$token_label"
+    read -rs JOIN_TOKEN
+    echo
+    if [[ -z $JOIN_TOKEN ]]; then warn 'Join token cannot be empty; please try again.'; continue; fi
+    verify_existing_cluster_token "$role" "$JOIN_TOKEN" && return
+    JOIN_TOKEN=
+    warn 'Cluster verification failed. Re-enter the VIP and token.'
+  done
 }
 
 check_identity_network(){
@@ -117,19 +154,21 @@ collect_metallb_pool(){
   printf '%s\n' \
     'Choose a range of unused addresses for applications exposed as LoadBalancer services.' \
     'The entire range must be reserved outside DHCP and must not contain any node address or the API VIP.'
-  prompt_required POOL_START 'First MetalLB address'
-  prompt_required POOL_END 'Last MetalLB address'
-  valid_ip_or_die start "$POOL_START"; valid_ip_or_die end "$POOL_END"
-  (( $(ip_to_int "$POOL_START") <= $(ip_to_int "$POOL_END") )) || die 'MetalLB range is reversed'
-  ip_in_range "$API_VIP" "$POOL_START" "$POOL_END" && die 'API VIP overlaps MetalLB pool'
-  ip_in_range "$NODE_IP" "$POOL_START" "$POOL_END" && die 'Node IP overlaps MetalLB pool'
-  confirm_yes 'I confirm this entire MetalLB range is unused and excluded from DHCP' || die 'Reserve the pool before continuing'
+  while true; do
+    prompt_ipv4 POOL_START 'First MetalLB address'
+    prompt_ipv4 POOL_END 'Last MetalLB address'
+    if (( $(ip_to_int "$POOL_START") > $(ip_to_int "$POOL_END") )); then warn 'MetalLB range is reversed; enter the range again.'; continue; fi
+    if ip_in_range "$API_VIP" "$POOL_START" "$POOL_END"; then warn 'API VIP overlaps the MetalLB pool; enter a different range.'; continue; fi
+    if ip_in_range "$NODE_IP" "$POOL_START" "$POOL_END"; then warn 'Node IP overlaps the MetalLB pool; enter a different range.'; continue; fi
+    confirm_yes 'I confirm this entire MetalLB range is unused and excluded from DHCP' && return
+    info 'Reserve the complete range or enter a different range.'
+  done
 }
 persist_state(){ local body; body=$(printf 'NODE_ROLE=%s\nNODE_IP=%s\nAPI_VIP=%s\nSTORAGE_MODE=%s\nSTORAGE_DEVICE=%s\nLONGHORN_PATH=%s\nLONGHORN_DEVICE_UUID=%s\nMETALLB_MODE=l2\n' "${NODE_ROLE:-server}" "$NODE_IP" "$API_VIP" "$STORAGE_MODE" "${STORAGE_DEVICE:-}" "$LONGHORN_PATH" "${LONGHORN_DEVICE_UUID:-}"); write_root_file "$STATE_FILE" 600 "$body" || true; }
 set_hostname_if_needed(){ [[ $(short_hostname) == "$DESIRED_HOSTNAME" ]] && return; need_cmd hostnamectl; info "Changing this node hostname to $DESIRED_HOSTNAME as shown in the accepted plan"; as_root hostnamectl set-hostname "$DESIRED_HOSTNAME"; }
 summary(){ cat <<EOF
 
-K3s Bootstrap $VERSION
+K3sDeploy Installer $VERSION
   Action:           $1
   Hostname:         $DESIRED_HOSTNAME
   Node IP:          $NODE_IP
@@ -178,19 +217,13 @@ promote_agent(){
   phase 6 7 'Waiting for Ready, control-plane and etcd membership'; wait_k3s; wait_local_node; check_kube_vip_interface || warn 'kube-vip requires operator attention'; ensure_iscsi
   phase 7 7 'Running final health and quorum-oriented validation'; validate_cluster
 }
-configure_updates_prompt(){ if confirm 'Enable security-only unattended upgrades (automatic reboot disabled)?'; then configure_updates; else skip 'Unattended upgrades unchanged'; fi; }
+configure_updates_prompt(){ if ! security_updates_supported; then skip "Automatic security-update configuration is not changed on $OS_NAME; use its native update policy."; elif confirm 'Enable security-only unattended upgrades (automatic reboot disabled)?'; then configure_updates; else skip 'Unattended upgrades unchanged'; fi; }
 load_state(){ local state_content; if [[ -r $STATE_FILE ]]; then state_content=$(<"$STATE_FILE"); elif sudo -n test -r "$STATE_FILE" 2>/dev/null; then state_content=$(sudo cat "$STATE_FILE"); else return 0; fi; while IFS='=' read -r key value; do case $key in NODE_ROLE|NODE_IP|API_VIP|STORAGE_MODE|STORAGE_DEVICE|LONGHORN_PATH|LONGHORN_DEVICE_UUID) printf -v "$key" '%s' "$value";; esac; done <<<"$state_content"; }
-main(){
-  local action
-  parse_args "$@"
-  preflight_collect
-  basic_host_sanity
-  announce_existing_k3s
-  printf '\nK3s Bootstrap %s\n\n1. Create new K3s cluster (Node 1 manager setup)\n2. Join existing K3s cluster as a manager node (control-plane + etcd)\n3. Join K3s cluster as a worker node\n4. Upgrade K3s cluster worker node to manager (control-plane + etcd)\n5. Validate this node and cluster\n6. Repair safe local differences\n7. Exit\n\nFor most clusters use 3 or 5 manager nodes; join remaining machines as workers.\n' "$VERSION"
-  read -r -p 'Selection: ' action
-  [[ $action == 7 ]] && exit 0
-  [[ $action =~ ^[1-6]$ ]] || die 'Invalid selection'
-
+show_main_menu(){
+  printf '\nK3sDeploy Installer %s\n\n1. Create new K3s cluster (Node 1 manager setup)\n2. Join existing K3s cluster as a manager node (control-plane + etcd)\n3. Join K3s cluster as a worker node\n4. Upgrade K3s cluster worker node to manager (control-plane + etcd)\n5. Validate this node and cluster\n6. Repair safe local differences\n7. Exit\n\nFor most clusters use 3 or 5 manager nodes; join remaining machines as workers.\n' "$VERSION"
+}
+dispatch_action(){
+  local action=$1
   if [[ $action == 5 ]] && ! k3s_local_installation_present; then
     phase 1 1 'Running read-only first-use validation'
     validate_cluster
@@ -201,7 +234,6 @@ main(){
     safe_repair
     return
   fi
-
   require_privileges
   load_state
   if [[ $action =~ ^[1-3]$ ]] && { [[ $K3S_INSTALLED == yes ]] || as_root_capture test -e "$CONFIG_FILE" || systemctl is-active --quiet k3s || systemctl is-active --quiet k3s-agent; }; then
@@ -216,4 +248,39 @@ main(){
     6) phase 1 1 'Checking and offering only safe repairs'; safe_repair;;
   esac
 }
-main "$@"
+run_menu_action(){
+  local action=$1 rc
+  trap - ERR
+  set +e
+  (
+    set -Eeuo pipefail
+    trap 'on_error $LINENO' ERR
+    dispatch_action "$action"
+  )
+  rc=$?
+  set -e
+  trap 'on_error $LINENO' ERR
+  if ((rc != 0)); then
+    warn "This workflow stopped safely (exit $rc). No later phases were run."
+    info 'Review the message above, correct the input or system condition, then choose an installer option again.'
+  else
+    ok 'Workflow finished. Returning to the installer menu.'
+  fi
+}
+main(){
+  local action
+  parse_args "$@"
+  while true; do
+    preflight_collect
+    basic_host_sanity
+    announce_existing_k3s
+    show_main_menu
+    read -r -p 'Selection: ' action
+    [[ $action == 7 ]] && return 0
+    if [[ ! $action =~ ^[1-6]$ ]]; then warn 'Invalid selection; choose a number from 1 to 7.'; continue; fi
+    run_menu_action "$action"
+  done
+}
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi

@@ -2,13 +2,16 @@
 
 ## Unreleased
 
-- Correct LVM root-volume discovery when Linux exposes the mounted root as `/dev/dm-*`, so free Ubuntu volume-group extents are reported instead of `0 GiB`.
+- Keep the interactive installer open after recoverable workflow failures; invalid VIPs, join credentials, hostnames, address pools, and menu selections can now be corrected without restarting it.
+- Detect the operating system and use its `apt`, `dnf`, `yum`, or `zypper` package manager instead of presenting Ubuntu-specific dependency instructions.
+- Replace legacy user-facing product wording with “installer” and “K3sDeploy Installer”.
+- Correct LVM root-volume discovery when Linux exposes the mounted root as `/dev/dm-*`, so free volume-group extents are reported instead of `0 GiB`.
 - Mark ineligible shared-root storage without terminating the installer, and return the operator to the storage menu with physical and virtualization-neutral disk guidance.
 - Distinguish a positive ARP duplicate-address response from an operational probe failure; occupied VIPs now stop safely, with ICMP used only as a fallback signal.
 - Recommend SSD/NVMe storage for K3s and Longhorn while retaining HDD support for appropriate workloads.
 - Default-Yes confirmations for detected hostname/address, network reservations, and safe dependency or service operations; destructive and risk-acceptance prompts remain default-No.
-- Optional installation of Ubuntu's `iputils-arping` package before checking whether a new API VIP is already in use.
-- Guided creation of a dedicated Longhorn LVM logical volume from free extents in default Ubuntu/Proxmox layouts, with root-headroom checks and exact confirmation.
+- Optional installation of the detected operating system's arping package before checking whether a new API VIP is already in use.
+- Guided creation of a dedicated Longhorn LVM logical volume from free extents in common Linux layouts, with root-headroom checks and exact confirmation.
 - Clean-node validation now reports uninstalled components as `MISSING` or `SKIP`, and safe repair no longer offers to start a nonexistent K3s service.
 - Manager and worker joins verify the existing API VIP and secure join token before collecting local storage choices.
 - Removed hardcoded lab network addresses; hostname and detected node-address confirmations now include beginner-facing guidance.

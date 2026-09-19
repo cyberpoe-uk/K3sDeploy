@@ -23,15 +23,45 @@ cleanup() {
     fi
 }
 
-is_ubuntu() {
+detect_operating_system() {
+    local PRETTY_NAME='Unknown Linux'
     [[ -r /etc/os-release ]] || return 1
     # shellcheck disable=SC1091
     source /etc/os-release
-    [[ "${ID:-}" == ubuntu ]]
+    OS_NAME=${PRETTY_NAME:-${NAME:-Unknown Linux}}
+    if command -v apt-get >/dev/null 2>&1; then OS_PACKAGE_MANAGER=apt
+    elif command -v dnf >/dev/null 2>&1; then OS_PACKAGE_MANAGER=dnf
+    elif command -v yum >/dev/null 2>&1; then OS_PACKAGE_MANAGER=yum
+    elif command -v zypper >/dev/null 2>&1; then OS_PACKAGE_MANAGER=zypper
+    else OS_PACKAGE_MANAGER=unsupported
+    fi
+    export OS_NAME OS_PACKAGE_MANAGER
+}
+
+package_refresh() {
+    case "${OS_PACKAGE_MANAGER:-unsupported}" in
+        apt) sudo apt-get update ;;
+        dnf) sudo dnf -y makecache ;;
+        yum) sudo yum -y makecache ;;
+        zypper) sudo zypper --non-interactive refresh ;;
+        *) die "Automatic Git installation is not supported on ${OS_NAME:-this operating system}. Install Git and CA certificates manually, then rerun the installer." ;;
+    esac
+}
+
+package_install_git() {
+    case "${OS_PACKAGE_MANAGER:-unsupported}" in
+        apt) sudo apt-get install -y git ca-certificates ;;
+        dnf) sudo dnf install -y git ca-certificates ;;
+        yum) sudo yum install -y git ca-certificates ;;
+        zypper) sudo zypper --non-interactive install --auto-agree-with-licenses git ca-certificates ;;
+        *) die "Automatic Git installation is not supported on ${OS_NAME:-this operating system}. Install Git and CA certificates manually, then rerun the installer." ;;
+    esac
 }
 
 ensure_git_dependency() {
     local answer
+
+    [[ -n ${OS_PACKAGE_MANAGER:-} ]] || detect_operating_system
 
     if command -v git >/dev/null 2>&1; then
         success "Git is available."
@@ -39,7 +69,7 @@ ensure_git_dependency() {
     fi
 
     info "Git is needed to download the latest tagged K3sDeploy release."
-    info "With your approval, Ubuntu will install Git before the K3sDeploy menu opens."
+    info "With your approval, ${OS_NAME} will install Git before the K3sDeploy menu opens."
     info "sudo may request your password; the launcher itself continues as your normal user."
     if ! read -rp "Install Git and continue? [Y/n]: " answer ||
         [[ -n "$answer" && ! "$answer" =~ ^([Yy]|[Yy][Ee][Ss])$ ]]; then
@@ -47,8 +77,8 @@ ensure_git_dependency() {
         return 1
     fi
 
-    sudo apt-get update || die "Ubuntu package information could not be refreshed."
-    sudo apt-get install -y git ca-certificates || die "Git installation failed."
+    package_refresh || die "${OS_NAME} package information could not be refreshed."
+    package_install_git || die "Git installation failed on ${OS_NAME}."
 }
 
 latest_stable_tag() {
@@ -72,7 +102,8 @@ main() {
     info "Starting the K3sDeploy launcher."
     info "It will download the latest stable tagged release and open its interactive menu."
 
-    is_ubuntu || die "K3sDeploy currently supports Ubuntu Server only."
+    detect_operating_system || die "K3sDeploy could not identify this operating system from /etc/os-release."
+    [[ $OS_PACKAGE_MANAGER != unsupported ]] || die "K3sDeploy detected $OS_NAME, but automatic dependency installation supports apt, dnf, yum, and zypper. Install Git manually or use a supported system."
     [[ $EUID -ne 0 ]] ||
         die "Run this launcher as a normal user, without sudo. K3sDeploy requests sudo only when needed."
     command -v sudo >/dev/null 2>&1 ||

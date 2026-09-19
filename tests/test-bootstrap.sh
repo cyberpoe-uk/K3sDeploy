@@ -4,6 +4,8 @@ set -Eeuo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=../k3sdeploy-latest.sh
 source "$ROOT/k3sdeploy-latest.sh"
+OS_NAME='Test Linux'
+OS_PACKAGE_MANAGER=apt
 
 pass=0
 fail=0
