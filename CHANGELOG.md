@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add a yellow K3sDeploy identity banner and a startup choice between recommended and advanced/custom installation profiles.
+- Let advanced users select MetalLB, built-in K3s ServiceLB, or external load balancing, plus Longhorn, K3s local-path, or external persistent storage; intentionally omitted components are skipped during installation and validation.
+- Prevent a normal clean-node Longhorn mount check from aborting phase 2 under strict error handling.
+- Group interactive output into clearly separated sections and expand installation workflows so error line numbers identify the failing operation.
 - Parse `/etc/os-release` without sourcing it, avoiding a collision between its `VERSION` field and K3sDeploy's read-only installer version.
 - Keep the interactive installer open after recoverable workflow failures; invalid VIPs, join credentials, hostnames, address pools, and menu selections can now be corrected without restarting it.
 - Detect the operating system and use its `apt`, `dnf`, `yum`, or `zypper` package manager instead of presenting Ubuntu-specific dependency instructions.

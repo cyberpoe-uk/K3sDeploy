@@ -13,15 +13,14 @@ preflight_collect(){
   SWAP_STATUS=disabled; swapon --noheadings --show 2>/dev/null | grep -q . && SWAP_STATUS=enabled
   ISCSI_INSTALLED=no; command -v iscsiadm >/dev/null && ISCSI_INSTALLED=yes
   TIME_SYNC=unknown; command -v timedatectl >/dev/null && TIME_SYNC=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo unknown)
+  return 0
 }
 basic_host_sanity(){
   [[ $OS_PACKAGE_MANAGER != unsupported ]] || die "K3sDeploy detected $OS_NAME, but does not yet support its package manager. Supported package managers: apt, dnf, yum, and zypper."
   [[ $(uname -m) == x86_64 || $(uname -m) == aarch64 || $(uname -m) == arm64 ]] || die "Unsupported CPU architecture: $(uname -m)"
   need_cmd ip; need_cmd systemctl; need_cmd curl
 }
-preflight_show(){ cat <<EOF
-
-Preflight summary
+preflight_show(){ section 'System preflight'; cat <<EOF
   Hostname:          $HOST_NOW
   Node IP:           ${NODE_IP:-$DETECTED_IP}
   Interface:         $PRIMARY_IFACE
@@ -71,4 +70,5 @@ detect_existing(){
   [[ -f $CONFIG_FILE ]] && warn "Existing K3s configuration detected: $CONFIG_FILE"
   if [[ -d /var/lib/longhorn ]] && [[ -n $(as_root_capture find /var/lib/longhorn -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) ]]; then LONGHORN_DATA_PRESENT=yes; warn "Existing Longhorn data detected; it will not be removed"; fi
   findmnt -rn /var/lib/longhorn >/dev/null 2>&1 && info "Existing Longhorn mount: $(findmnt -rn -o SOURCE,FSTYPE,TARGET /var/lib/longhorn)"
+  return 0
 }

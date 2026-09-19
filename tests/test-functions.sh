@@ -39,6 +39,17 @@ rendered=$(render_k3s_config join 'secret-test-token')
 assert_ok grep -q '^server: https://10.10.20.10:6443$' <<<"$rendered"
 assert_ok grep -q '^token: "secret-test-token"$' <<<"$rendered"
 assert_ok grep -q '^  - servicelb$' <<<"$rendered"
+assert_bad grep -q '^  - local-storage$' <<<"$rendered"
+LOAD_BALANCER_MODE=servicelb STORAGE_PROVIDER=local-path
+servicelb_rendered=$(render_k3s_config first)
+assert_bad grep -q '^disable:$' <<<"$servicelb_rendered"
+assert_bad grep -q '^  - servicelb$' <<<"$servicelb_rendered"
+assert_bad grep -q '^  - local-storage$' <<<"$servicelb_rendered"
+LOAD_BALANCER_MODE=external STORAGE_PROVIDER=external
+external_rendered=$(render_k3s_config first)
+assert_ok grep -q '^  - servicelb$' <<<"$external_rendered"
+assert_ok grep -q '^  - local-storage$' <<<"$external_rendered"
+LOAD_BALANCER_MODE=metallb STORAGE_PROVIDER=longhorn
 agent_rendered=$(render_k3s_config agent 'agent-secret-token')
 assert_ok grep -q '^server: https://10.10.20.10:6443$' <<<"$agent_rendered"
 assert_ok grep -q '^token: "agent-secret-token"$' <<<"$agent_rendered"
@@ -69,6 +80,11 @@ fresh_report=$(validate_cluster)
 assert_ok grep -Eq '^K3s service[[:space:]]+MISSING' <<<"$fresh_report"
 assert_ok grep -Eq '^Longhorn[[:space:]]+MISSING' <<<"$fresh_report"
 assert_bad grep -Eq '^K3s service[[:space:]]+FAIL' <<<"$fresh_report"
+STORAGE_PROVIDER=external LOAD_BALANCER_MODE=external
+external_report=$(validate_cluster)
+assert_ok grep -Eq '^Longhorn[[:space:]]+SKIP' <<<"$external_report"
+assert_ok grep -Eq '^Persistent storage[[:space:]]+SKIP' <<<"$external_report"
+STORAGE_PROVIDER=longhorn LOAD_BALANCER_MODE=metallb
 repair_report=$(safe_repair)
 assert_ok grep -q 'There is nothing to repair on this clean node' <<<"$repair_report"
 assert_bad grep -q 'Start inactive' <<<"$repair_report"

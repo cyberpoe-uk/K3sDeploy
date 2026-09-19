@@ -4,6 +4,9 @@ readonly K3S_BOOTSTRAP_COMMON_LOADED=1
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd); readonly PROJECT_ROOT
 VERSION=$(<"$PROJECT_ROOT/VERSION"); readonly VERSION; export VERSION
 DRY_RUN=${DRY_RUN:-false}; VERBOSE=${VERBOSE:-false}; ASSUME_YES=${ASSUME_YES:-false}
+INSTALL_PROFILE=${INSTALL_PROFILE:-recommended}
+LOAD_BALANCER_MODE=${LOAD_BALANCER_MODE:-metallb}
+STORAGE_PROVIDER=${STORAGE_PROVIDER:-longhorn}
 LOG_FILE=${LOG_FILE:-/var/log/k3s-bootstrap/k3s-bootstrap-$(date +%Y%m%d-%H%M%S).log}
 STATE_FILE=${STATE_FILE:-/etc/k3s-bootstrap/config}
 CONFIG_FILE=${CONFIG_FILE:-/etc/rancher/k3s/config.yaml}
@@ -75,6 +78,22 @@ package_for(){
 colour() { [[ -t 1 ]] && printf '\033[%sm' "$1" || true; }
 log() { local level=$1 colour_code=$2; shift 2; printf '%s[%s] %-6s%s %s\n' "$(colour "$colour_code")" "$(date '+%F %T')" "$level" "$(colour 0)" "$*"; [[ -w ${LOG_FILE%/*} ]] && printf '[%s] %-6s %s\n' "$(date '+%F %T')" "$level" "$*" >>"$LOG_FILE" || true; }
 info(){ log INFO 36 "$*"; }; ok(){ log OK 32 "$*"; }; warn(){ log WARN 33 "$*"; }; error(){ log ERROR 31 "$*"; }; skip(){ log SKIP 34 "$*"; }; change(){ log CHANGE 35 "$*"; }
+section(){ local title=$1 rule; printf -v rule '%*s' "${#title}" ''; printf '\n%s\n%s\n\n' "$title" "${rule// /-}"; }
+show_banner(){
+  local yellow= reset=
+  if [[ -t 1 ]]; then yellow='\033[0;33m'; reset='\033[0m'; fi
+  printf '%b' "$yellow"
+  cat <<'EOF'
+ _  __ _____      ____             _
+| |/ /|___ / ___ |  _ \  ___ _ __ | | ___  _   _
+| ' /   |_ \/ __|| | | |/ _ \ '_ \| |/ _ \| | | |
+| . \  ___) \__ \| |_| |  __/ |_) | | (_) | |_| |
+|_|\_\|____/|___/|____/ \___| .__/|_|\___/ \__, |
+                             |_|             |___/
+EOF
+  printf '\n[K3SDEPLOY] Launching K3sDeploy %s...\n' "$VERSION"
+  printf 'Safe, guided K3s cluster installation and node management\n%b' "$reset"
+}
 die(){ error "$*"; exit 1; }
 on_error(){ local rc=$? line=$1; error "Failed at line $line (exit $rc). Log: $LOG_FILE"; exit "$rc"; }
 confirm(){ local prompt=${1:-Proceed?}; $ASSUME_YES && return 0; read -r -p "$prompt [y/N] " reply; [[ $reply =~ ^[Yy]([Ee][Ss])?$ ]]; }

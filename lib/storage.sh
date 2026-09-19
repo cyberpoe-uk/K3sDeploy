@@ -71,7 +71,7 @@ check_os_headroom(){
   local disk=$1 root_gib available_gib disk_gib allocated_percent
   root_gib=$(root_capacity_gib); available_gib=$(root_available_gib); disk_gib=$(block_capacity_gib "$disk")
   allocated_percent=$((root_gib * 100 / disk_gib))
-  printf '\nOS headroom check:\n'
+  section 'OS disk safety check'
   printf '  Root filesystem: %d GiB total, %d GiB available\n' "$root_gib" "$available_gib"
   printf '  Root allocation: approximately %d%% of the %d GiB OS disk\n' "$allocated_percent" "$disk_gib"
   if ((allocated_percent < OS_DISK_MIN_ROOT_PERCENT)); then
@@ -95,8 +95,8 @@ warn_small_longhorn_capacity(){
 }
 
 show_additional_storage_guidance(){
+  section 'Recommended storage actions'
   cat <<EOF
-Recommended actions:
   - Virtual machine: use your hypervisor or cloud console to attach a new empty
     virtual disk. Follow that platform's hot-add or shutdown instructions, then
     confirm the disk appears in 'lsblk' and rerun K3sDeploy using option 3.
@@ -111,7 +111,8 @@ EOF
 }
 
 list_disks(){
-  printf '\nAvailable block devices (nothing is selected automatically):\n'
+  section 'Available block devices'
+  printf '  Nothing is selected automatically. Review device names and sizes carefully.\n\n'
   lsblk -e7 -o NAME,MODEL,SIZE,TYPE,FSTYPE,MOUNTPOINTS
 }
 
@@ -300,9 +301,13 @@ plan_lvm_volume(){
   free_gib=$(gib_from_bytes "$free_bytes")
   ((free_gib > LONGHORN_DATA_MIN_GIB)) || return 1
   maximum_gib=$((free_gib-1)); recommended_gib=$maximum_gib
-  printf '\n%s LVM has %d GiB unallocated inside volume group %s.\n' "$OS_NAME" "$free_gib" "$vg"
-  printf 'Recommended Longhorn logical volume: %d GiB (leaves approximately 1 GiB free in the volume group).\n' "$recommended_gib"
-  printf 'This uses only currently free LVM extents; it does not shrink or change the root logical volume.\n'
+  section 'Longhorn LVM plan'
+  printf '  Operating system:  %s\n' "$OS_NAME"
+  printf '  Volume group:      %s\n' "$vg"
+  printf '  Free in group:     %d GiB\n' "$free_gib"
+  printf '  Recommended size:  %d GiB\n' "$recommended_gib"
+  printf '  Safety margin:     approximately 1 GiB remains free in the volume group\n'
+  printf '  Existing volumes:  no root or existing logical volume will be resized\n\n'
   while true; do
     read -r -p "Longhorn logical volume size in GiB [$recommended_gib]: " requested_gib
     requested_gib=${requested_gib:-$recommended_gib}
@@ -424,7 +429,7 @@ select_os_disk_partition(){
   read -r free_start free_end free_bytes <<<"$region"
   free_gib=0; [[ -z ${free_bytes:-} ]] || free_gib=$(gib_from_bytes "$free_bytes")
   mapfile -t _existing_partitions < <(unused_partitions "$root_disk")
-  printf '\nOS-disk storage choices for %s:\n' "$root_disk"
+  section "OS-disk storage choices: $root_disk"
   if [[ $lvm_status == inspection-failed ]]; then
     printf '  1. Create an LVM logical volume (unavailable: LVM inspection failed)\n'
   elif [[ $lvm_status == not-applicable ]]; then
@@ -444,19 +449,20 @@ select_os_disk_partition(){
   printf '  3. Use an existing unused partition (%d eligible found)\n' "${#_existing_partitions[@]}"
   ((${#_existing_partitions[@]} > 0)) && [[ $default_subchoice == 4 ]] && default_subchoice=3
   printf '  4. Return to the main storage choices\n'
-  printf '\nNo root filesystem, logical volume, or existing partition will be shrunk or moved.\n'
+  printf '\n  Safety: no root filesystem, logical volume, or existing partition will be shrunk or moved.\n'
   if [[ $lvm_status == inspected && $free_gib == 0 ]]; then
-    printf 'The 0 GiB physical result is expected on a fully partitioned LVM disk.\n'
-    printf 'K3sDeploy checked inside volume group %s separately; use choice 1 when it reports enough free space.\n' "$lvm_vg"
+    printf '  Note: 0 GiB physical space is expected on a fully partitioned LVM disk.\n'
+    printf '  K3sDeploy checked inside volume group %s separately; use choice 1 when it reports enough free space.\n' "$lvm_vg"
   fi
   if [[ $default_subchoice == 4 ]]; then
-    printf '\nNo safe separate space is currently available on the OS disk.\n'
+    printf '\n  No safe separate space is currently available on the OS disk.\n'
     if [[ $lvm_status == inspection-failed ]]; then
       printf 'The root is on LVM, but K3sDeploy could not map it safely to a volume group. No LVM change will be attempted.\n'
       printf 'For troubleshooting, record the output of: sudo lvs -o vg_name,lv_name,lv_path,lv_size; sudo vgs -o vg_name,vg_size,vg_free\n'
     fi
     show_additional_storage_guidance
   fi
+  printf '\n'
   read -r -p "Selection [$default_subchoice]: " subchoice; subchoice=${subchoice:-$default_subchoice}
   case $subchoice in
     1)
@@ -477,8 +483,10 @@ select_os_disk_partition(){
   esac
   ((free_gib > LONGHORN_DATA_MIN_GIB)) || die "There is not enough unallocated space. At least ${LONGHORN_DATA_MIN_GIB} GiB plus 1 GiB safety margin is required."
   maximum_gib=$((free_gib-1)); recommended_gib=$maximum_gib
-  printf '\nLargest unallocated region: %d GiB\n' "$free_gib"
-  printf 'Recommended Longhorn partition: %d GiB (leaves approximately 1 GiB unallocated for alignment/recovery)\n' "$recommended_gib"
+  section 'Longhorn partition plan'
+  printf '  Largest unallocated region: %d GiB\n' "$free_gib"
+  printf '  Recommended partition:     %d GiB\n' "$recommended_gib"
+  printf '  Safety margin:             approximately 1 GiB remains unallocated\n\n'
   while true; do
     read -r -p "Longhorn partition size in GiB [$recommended_gib]: " requested_gib
     requested_gib=${requested_gib:-$recommended_gib}
@@ -510,7 +518,7 @@ select_dedicated_disk(){
     show_additional_storage_guidance
     return 1
   fi
-  printf '\nEligible empty disks:\n'
+  section 'Eligible empty disks'
   for device in "${candidates[@]}"; do model=$(lsblk -dnro MODEL "$device"); size=$(lsblk -dnro SIZE "$device"); printf '  %d. %-14s %-10s %s\n' "$index" "$device" "$size" "${model:-unknown model}"; ((index+=1)); done
   while true; do
     read -r -p 'Choose a disk number: ' answer
@@ -549,12 +557,13 @@ select_storage(){
     if [[ -n $root_disk ]]; then default_choice=2; else default_choice=3; fi
   fi
   while true; do
+    section 'Longhorn storage'
     cat <<EOF
+Detected storage
+  Root filesystem: ${root_gib} GiB total, ${available_gib} GiB available (${root_fstype})
+  OS disk:         ${root_disk:-unknown} (${root_disk_gib} GiB)
 
-Longhorn storage
-
-Detected root filesystem: ${root_gib} GiB total, ${available_gib} GiB available
-Detected OS disk:         ${root_disk:-unknown} (${root_disk_gib} GiB)
+Storage choices
 
 1. Use the root filesystem (simplest)$($root_eligible || printf ' - UNAVAILABLE')
    Requires ext4/XFS, ${LONGHORN_ROOT_MIN_GIB} GiB total and ${LONGHORN_ROOT_MIN_AVAILABLE_GIB} GiB available.
@@ -572,6 +581,7 @@ Detected OS disk:         ${root_disk:-unknown} (${root_disk_gib} GiB)
 
 All separate storage is mounted by UUID at $LONGHORN_STANDARD_PATH.
 EOF
+    printf '\n'
     read -r -p "Selection [$default_choice]: " choice; choice=${choice:-$default_choice}
     case $choice in
       1) if select_root_storage; then return; fi;;
@@ -584,6 +594,10 @@ EOF
 
 validate_storage_selection(){
   local actual_uuid
+  if [[ ${STORAGE_PROVIDER:-longhorn} != longhorn || ${STORAGE_MODE:-} == external ]]; then
+    report 'Longhorn storage path' SKIP 'external storage selected'
+    return 0
+  fi
   [[ -d ${LONGHORN_PATH:-$LONGHORN_STANDARD_PATH} ]] || { report 'Longhorn storage path' MISSING 'not configured on this node'; return 1; }
   case ${STORAGE_MODE:-unknown} in
     root) report 'Longhorn storage path' OK 'shared root filesystem';;

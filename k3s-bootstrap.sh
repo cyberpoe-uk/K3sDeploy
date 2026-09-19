@@ -39,6 +39,86 @@ Interactive modes: create first manager, join manager, join worker, promote work
 EOF
 }
 parse_args(){ while (($#)); do case $1 in --dry-run) DRY_RUN=true;; --verbose) VERBOSE=true;; --yes) ASSUME_YES=true;; --help|-h) usage; exit;; --version) echo "$VERSION"; exit;; *) die "Unknown option: $1";; esac; shift; done; }
+use_metallb(){ [[ $LOAD_BALANCER_MODE == metallb ]]; }
+use_servicelb(){ [[ $LOAD_BALANCER_MODE == servicelb ]]; }
+use_longhorn(){ [[ $STORAGE_PROVIDER == longhorn ]]; }
+set_recommended_profile(){ INSTALL_PROFILE=recommended; LOAD_BALANCER_MODE=metallb; STORAGE_PROVIDER=longhorn; }
+configure_advanced_profile(){
+  local choice
+  INSTALL_PROFILE=advanced
+  section 'Advanced load-balancer choice'
+  printf '%s\n' \
+    '1. MetalLB (installed and configured by K3sDeploy)' \
+    '2. K3s ServiceLB (built into K3s; suitable for simpler environments)' \
+    '3. External or none (you will install and manage it separately)'
+  while true; do
+    printf '\n'
+    read -r -p 'Selection [1]: ' choice
+    case ${choice:-1} in
+      1) LOAD_BALANCER_MODE=metallb; break;;
+      2) LOAD_BALANCER_MODE=servicelb; break;;
+      3) LOAD_BALANCER_MODE=external; break;;
+      *) warn 'Choose load-balancer option 1, 2, or 3.';;
+    esac
+  done
+
+  section 'Advanced persistent-storage choice'
+  printf '%s\n' \
+    '1. Longhorn (installed and configured by K3sDeploy)' \
+    '2. K3s local-path (simple node-local storage without replication)' \
+    '3. External or none (K3s local-storage is disabled; you manage storage separately)'
+  while true; do
+    printf '\n'
+    read -r -p 'Selection [1]: ' choice
+    case ${choice:-1} in
+      1) STORAGE_PROVIDER=longhorn; break;;
+      2) STORAGE_PROVIDER=local-path; break;;
+      3) STORAGE_PROVIDER=external; break;;
+      *) warn 'Choose persistent-storage option 1, 2, or 3.';;
+    esac
+  done
+  warn 'Advanced choices must match the architecture used by every other node in this cluster.'
+}
+choose_install_profile(){
+  local choice
+  while true; do
+    section 'Installation profile'
+    printf '%s\n' \
+      '1. Recommended installation' \
+      '   K3sDeploy configures kube-vip, MetalLB, and Longhorn with guided defaults.' \
+      '' \
+      '2. Advanced / custom installation' \
+      '   Choose bundled, built-in, or externally managed load balancing and storage.' \
+      '   K3sDeploy only installs components it explicitly lists as supported.' \
+      '' \
+      '3. Exit'
+    printf '\n'
+    read -r -p 'Selection [1]: ' choice
+    case ${choice:-1} in
+      1) set_recommended_profile; return 0;;
+      2) configure_advanced_profile; return 0;;
+      3) return 1;;
+      *) warn 'Choose installation profile 1, 2, or 3.';;
+    esac
+  done
+}
+prepare_storage_choice(){
+  if use_longhorn; then
+    select_storage
+  else
+    STORAGE_MODE=external
+    STORAGE_DEVICE=
+    STORAGE_DEVICE_MAJMIN=
+    if [[ $STORAGE_PROVIDER == local-path ]]; then
+      STORAGE_DESCRIPTION='use the built-in K3s local-path provisioner; data remains tied to one node'
+    else
+      STORAGE_DESCRIPTION='externally managed; K3s local-storage is disabled and no storage device is changed'
+    fi
+    LONGHORN_PATH=
+    LONGHORN_DEVICE_UUID=
+    skip "Longhorn storage selection omitted ($STORAGE_PROVIDER selected)"
+  fi
+}
 valid_ip_or_die(){ validate_ipv4 "$2" || die "$1 is not a valid IPv4 address: $2"; }
 valid_hostname_or_die(){ [[ ${#1} -le 253 && $1 =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && $1 != *..* ]] || die "Invalid hostname '$1'. Use lowercase letters, numbers, dots or hyphens."; }
 prompt_ipv4(){
@@ -62,8 +142,9 @@ prompt_hostname(){
 }
 collect_local_identity(){
   local current_hostname
+  section 'Node identity'
   current_hostname=$(short_hostname); current_hostname=${current_hostname,,}
-  printf '\nDetected hostname: %s\n' "$current_hostname"
+  printf '  Detected hostname: %s\n\n' "$current_hostname"
   if confirm_yes "Keep hostname '$current_hostname'?"; then
     DESIRED_HOSTNAME=$current_hostname
   else
@@ -75,7 +156,9 @@ collect_local_identity(){
   fi
 
   [[ -n $DETECTED_IP ]] || die 'No primary IPv4 address was detected. Configure networking, then rerun K3sDeploy.'
-  printf '\nDetected node address: %s on interface %s\n' "$DETECTED_IP" "${PRIMARY_IFACE:-unknown}"
+  section 'Node network address'
+  printf '  Detected address:   %s\n' "$DETECTED_IP"
+  printf '  Detected interface: %s\n\n' "${PRIMARY_IFACE:-unknown}"
   info 'Every cluster node needs a stable address, normally provided by a DHCP reservation or static network configuration.'
   if ! confirm_yes "Use $DETECTED_IP as this node's permanent cluster address?"; then
     die 'Configure the desired static address or DHCP reservation, restart networking (or reboot), and rerun K3sDeploy.'
@@ -85,12 +168,13 @@ collect_local_identity(){
 }
 
 collect_new_cluster_vip(){
-  printf '\nKubernetes API virtual IP (VIP)\n'
+  section 'Kubernetes API virtual IP (VIP)'
   printf '%s\n' \
-    'This is one unused address that will always lead to the active managers.' \
-    'Choose it from the same Layer-2 network/VLAN as the manager addresses.' \
-    'Reserve it outside DHCP. Do not assign it to a VM, router, or other device.' \
-    'Example only: if this node is 192.168.10.21/24, an unused reserved address such as 192.168.10.20 could be suitable.'
+    '  Purpose: one unused address that always leads to the active managers.' \
+    '  Network: use the same Layer-2 network/VLAN as the manager addresses.' \
+    '  Reserve: keep it outside DHCP and do not assign it to another device.' \
+    '  Example: for node 192.168.10.21/24, an unused address such as 192.168.10.20 may be suitable.'
+  printf '\n'
   ensure_arping || true
   while true; do
     prompt_ipv4 API_VIP 'Enter the unused API VIP for this new cluster'
@@ -116,11 +200,12 @@ collect_new_cluster_vip(){
 
 collect_join_access(){
   local role=$1 token_label
-  printf '\nExisting cluster connection\n'
+  section 'Existing cluster connection'
   printf '%s\n' \
-    'Enter the exact Kubernetes API VIP created on the first manager.' \
-    'Do not enter this new node address or the address of only one manager.' \
-    'The installer will verify the existing cluster and token before asking about storage.'
+    '  Enter the exact Kubernetes API VIP created on the first manager.' \
+    '  Do not enter this node address or the address of only one manager.' \
+    '  The installer verifies the cluster and token before asking about storage.'
+  printf '\n'
   token_label='K3s join token from a healthy manager (input hidden)'
   if [[ $role == server ]]; then
     token_label='K3s SERVER token from /var/lib/rancher/k3s/server/token (input hidden)'
@@ -150,10 +235,12 @@ check_identity_network(){
 }
 
 collect_metallb_pool(){
-  printf '\nMetalLB application address pool\n'
+  section 'MetalLB application address pool'
   printf '%s\n' \
-    'Choose a range of unused addresses for applications exposed as LoadBalancer services.' \
-    'The entire range must be reserved outside DHCP and must not contain any node address or the API VIP.'
+    '  Choose unused addresses for applications exposed as LoadBalancer services.' \
+    '  Reserve the complete range outside DHCP.' \
+    '  The range must not contain a node address or the Kubernetes API VIP.'
+  printf '\n'
   while true; do
     prompt_ipv4 POOL_START 'First MetalLB address'
     prompt_ipv4 POOL_END 'Last MetalLB address'
@@ -164,29 +251,160 @@ collect_metallb_pool(){
     info 'Reserve the complete range or enter a different range.'
   done
 }
-persist_state(){ local body; body=$(printf 'NODE_ROLE=%s\nNODE_IP=%s\nAPI_VIP=%s\nSTORAGE_MODE=%s\nSTORAGE_DEVICE=%s\nLONGHORN_PATH=%s\nLONGHORN_DEVICE_UUID=%s\nMETALLB_MODE=l2\n' "${NODE_ROLE:-server}" "$NODE_IP" "$API_VIP" "$STORAGE_MODE" "${STORAGE_DEVICE:-}" "$LONGHORN_PATH" "${LONGHORN_DEVICE_UUID:-}"); write_root_file "$STATE_FILE" 600 "$body" || true; }
+persist_state(){ local body; body=$(printf 'INSTALL_PROFILE=%s\nLOAD_BALANCER_MODE=%s\nSTORAGE_PROVIDER=%s\nNODE_ROLE=%s\nNODE_IP=%s\nAPI_VIP=%s\nSTORAGE_MODE=%s\nSTORAGE_DEVICE=%s\nLONGHORN_PATH=%s\nLONGHORN_DEVICE_UUID=%s\n' "$INSTALL_PROFILE" "$LOAD_BALANCER_MODE" "$STORAGE_PROVIDER" "${NODE_ROLE:-server}" "$NODE_IP" "$API_VIP" "$STORAGE_MODE" "${STORAGE_DEVICE:-}" "${LONGHORN_PATH:-}" "${LONGHORN_DEVICE_UUID:-}"); write_root_file "$STATE_FILE" 600 "$body" || true; }
 set_hostname_if_needed(){ [[ $(short_hostname) == "$DESIRED_HOSTNAME" ]] && return; need_cmd hostnamectl; info "Changing this node hostname to $DESIRED_HOSTNAME as shown in the accepted plan"; as_root hostnamectl set-hostname "$DESIRED_HOSTNAME"; }
-summary(){ cat <<EOF
-
-K3sDeploy Installer $VERSION
+summary(){ section 'Installation plan'; cat <<EOF
+  Installer:        K3sDeploy $VERSION
   Action:           $1
   Hostname:         $DESIRED_HOSTNAME
   Node IP:          $NODE_IP
   API VIP:          $API_VIP
   Role:             ${TARGET_ROLE:-control-plane + etcd + worker}
-  Longhorn:         $STORAGE_MODE ($LONGHORN_PATH)
-  Storage source:   ${STORAGE_DEVICE:-root filesystem}
+  Profile:          $INSTALL_PROFILE
+  Load balancer:    $LOAD_BALANCER_MODE
+  Storage provider: $STORAGE_PROVIDER
+  Storage mode:     $STORAGE_MODE${LONGHORN_PATH:+ ($LONGHORN_PATH)}
+  Storage source:   ${STORAGE_DEVICE:-externally managed / none}
   Storage plan:     ${STORAGE_DESCRIPTION:-use existing configured storage}
-  K3s ServiceLB:    disabled
-  LoadBalancer:     $2
+  K3s ServiceLB:    $(use_servicelb && printf 'enabled' || printf 'disabled')
+  Address pool:     $2
 EOF
 }
-new_cluster(){ NODE_ROLE=server; TARGET_ROLE='control-plane + etcd + schedulable worker'; phase 1 8 'Collecting node, network and storage choices'; collect_local_identity; collect_new_cluster_vip; select_storage; collect_metallb_pool; LONGHORN_REPLICAS=1
-  phase 2 8 'Reviewing preflight checks and planned changes'; summary 'Create new K3s cluster / first server' "$POOL_START-$POOL_END"; preflight_show; detect_existing; [[ $K3S_INSTALLED == no && ! -f $CONFIG_FILE ]] || die 'Existing K3s detected. Use validate/repair; refusing to initialize over it.'; [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to initialize a new cluster over it.'; confirm Proceed? || { skip Cancelled; return; }; phase 3 8 'Preparing storage, hostname and protected installer state'; apply_storage_plan; set_hostname_if_needed; persist_state; phase 4 8 'Installing the pinned K3s first server'; install_k3s "$(render_k3s_config first)" server; wait_k3s; wait_local_node; phase 5 8 'Installing the kube-vip API virtual address'; install_kube_vip; phase 6 8 'Installing MetalLB for application addresses'; install_metallb; phase 7 8 'Installing Longhorn and host storage prerequisites'; install_longhorn; configure_updates_prompt; phase 8 8 'Running final health validation'; validate_cluster; }
-join_cluster(){ NODE_ROLE=server; TARGET_ROLE='control-plane + etcd + schedulable worker'; phase 1 8 'Verifying cluster, then collecting manager choices'; collect_join_access server; collect_local_identity; check_identity_network; select_storage
-  phase 2 8 'Checking the existing cluster and local node'; summary 'Join existing HA cluster' 'existing MetalLB cluster'; preflight_show; detect_existing; if [[ $K3S_INSTALLED == yes || -f $CONFIG_FILE ]]; then die 'Existing K3s/config detected. Use validate/repair; refusing to overwrite or rejoin.'; fi; [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to join over it without manual recovery review.'; confirm Proceed? || { JOIN_TOKEN=; skip Cancelled; return; }; phase 3 8 'Preparing storage, hostname and protected installer state'; apply_storage_plan; set_hostname_if_needed; persist_state; phase 4 8 'Installing K3s and joining embedded etcd'; local cfg; cfg=$(render_k3s_config join "$JOIN_TOKEN"); install_k3s "$cfg" server; JOIN_TOKEN=; cfg=; phase 5 8 'Waiting for Ready, control-plane and etcd roles'; wait_k3s; wait_local_node; phase 6 8 'Checking kube-vip compatibility on this server'; check_kube_vip_interface || warn 'kube-vip requires operator attention'; phase 7 8 'Preparing storage and checking cluster-wide services'; ensure_iscsi; info 'Cluster-wide kube-vip, MetalLB, Traefik and Longhorn are inspected, not reinstalled.'; phase 8 8 'Running final health validation'; validate_cluster; }
-join_agent(){ NODE_ROLE=agent; TARGET_ROLE='worker/agent (no control-plane or etcd)'; phase 1 7 'Verifying cluster, then collecting worker choices'; collect_join_access agent; collect_local_identity; check_identity_network; select_storage
-  phase 2 7 'Checking the existing cluster and local node'; summary 'Join existing cluster as worker/agent' 'existing MetalLB cluster'; preflight_show; detect_existing; if [[ $K3S_INSTALLED == yes || -f $CONFIG_FILE ]]; then die 'Existing K3s/config detected. Use validate/repair; refusing to overwrite or rejoin.'; fi; [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to join over it without manual recovery review.'; confirm Proceed? || { JOIN_TOKEN=; skip Cancelled; return; }; phase 3 7 'Preparing storage, hostname and protected installer state'; apply_storage_plan; set_hostname_if_needed; persist_state; phase 4 7 'Installing the pinned K3s agent'; local cfg; cfg=$(render_k3s_config agent "$JOIN_TOKEN"); install_k3s "$cfg" agent; JOIN_TOKEN=; cfg=; phase 5 7 'Waiting for the worker node to become Ready'; wait_agent_node; phase 6 7 'Preparing Longhorn host prerequisites'; ensure_iscsi; info 'Cluster-wide add-ons are not reinstalled on worker nodes.'; phase 7 7 'Running final health validation'; validate_cluster; }
+new_cluster(){
+  NODE_ROLE=server
+  TARGET_ROLE='control-plane + etcd + schedulable worker'
+
+  phase 1 8 'Collecting node, network and storage choices'
+  collect_local_identity
+  collect_new_cluster_vip
+  prepare_storage_choice
+  if use_metallb; then collect_metallb_pool; else skip "MetalLB address pool omitted ($LOAD_BALANCER_MODE selected)"; fi
+  LONGHORN_REPLICAS=1
+
+  phase 2 8 'Reviewing preflight checks and planned changes'
+  summary 'Create new K3s cluster / first server' "${POOL_START:+$POOL_START-$POOL_END}${POOL_START:-managed outside MetalLB}"
+  preflight_show
+  detect_existing
+  [[ $K3S_INSTALLED == no && ! -f $CONFIG_FILE ]] || die 'Existing K3s detected. Use validate/repair; refusing to initialize over it.'
+  if use_longhorn; then [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to initialize a new cluster over it.'; fi
+  section 'Final confirmation'
+  confirm 'Apply this installation plan?' || { skip 'Cancelled'; return; }
+
+  phase 3 8 'Preparing storage, hostname and protected installer state'
+  if use_longhorn; then apply_storage_plan; else skip 'No Longhorn storage changes requested'; fi
+  set_hostname_if_needed
+  persist_state
+
+  phase 4 8 'Installing the pinned K3s first server'
+  install_k3s "$(render_k3s_config first)" server
+  wait_k3s
+  wait_local_node
+
+  phase 5 8 'Installing the kube-vip API virtual address'
+  install_kube_vip
+
+  phase 6 8 'Installing MetalLB for application addresses'
+  if use_metallb; then install_metallb; else skip "MetalLB not selected; load-balancer mode is $LOAD_BALANCER_MODE"; fi
+
+  phase 7 8 'Installing Longhorn and host storage prerequisites'
+  if use_longhorn; then install_longhorn; else skip "Longhorn not selected; storage provider is $STORAGE_PROVIDER"; fi
+  configure_updates_prompt
+
+  phase 8 8 'Running final health validation'
+  validate_cluster
+}
+
+join_cluster(){
+  local cfg
+  NODE_ROLE=server
+  TARGET_ROLE='control-plane + etcd + schedulable worker'
+
+  phase 1 8 'Verifying cluster, then collecting manager choices'
+  collect_join_access server
+  collect_local_identity
+  check_identity_network
+  prepare_storage_choice
+
+  phase 2 8 'Checking the existing cluster and local node'
+  summary 'Join existing HA cluster' "existing $LOAD_BALANCER_MODE configuration"
+  preflight_show
+  detect_existing
+  if [[ $K3S_INSTALLED == yes || -f $CONFIG_FILE ]]; then
+    die 'Existing K3s/config detected. Use validate/repair; refusing to overwrite or rejoin.'
+  fi
+  if use_longhorn; then [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to join over it without manual recovery review.'; fi
+  section 'Final confirmation'
+  confirm 'Apply this installation plan?' || { JOIN_TOKEN=; skip 'Cancelled'; return; }
+
+  phase 3 8 'Preparing storage, hostname and protected installer state'
+  if use_longhorn; then apply_storage_plan; else skip 'No Longhorn storage changes requested'; fi
+  set_hostname_if_needed
+  persist_state
+
+  phase 4 8 'Installing K3s and joining embedded etcd'
+  cfg=$(render_k3s_config join "$JOIN_TOKEN")
+  install_k3s "$cfg" server
+  JOIN_TOKEN=
+  cfg=
+
+  phase 5 8 'Waiting for Ready, control-plane and etcd roles'
+  wait_k3s
+  wait_local_node
+
+  phase 6 8 'Checking kube-vip compatibility on this server'
+  check_kube_vip_interface || warn 'kube-vip requires operator attention'
+
+  phase 7 8 'Preparing storage and checking cluster-wide services'
+  if use_longhorn; then ensure_iscsi; else skip 'Longhorn host prerequisites not selected'; fi
+  info 'Cluster-wide kube-vip, load balancing, Traefik and persistent storage are inspected, not reinstalled.'
+
+  phase 8 8 'Running final health validation'
+  validate_cluster
+}
+
+join_agent(){
+  local cfg
+  NODE_ROLE=agent
+  TARGET_ROLE='worker/agent (no control-plane or etcd)'
+
+  phase 1 7 'Verifying cluster, then collecting worker choices'
+  collect_join_access agent
+  collect_local_identity
+  check_identity_network
+  prepare_storage_choice
+
+  phase 2 7 'Checking the existing cluster and local node'
+  summary 'Join existing cluster as worker/agent' "existing $LOAD_BALANCER_MODE configuration"
+  preflight_show
+  detect_existing
+  if [[ $K3S_INSTALLED == yes || -f $CONFIG_FILE ]]; then
+    die 'Existing K3s/config detected. Use validate/repair; refusing to overwrite or rejoin.'
+  fi
+  if use_longhorn; then [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to join over it without manual recovery review.'; fi
+  section 'Final confirmation'
+  confirm 'Apply this installation plan?' || { JOIN_TOKEN=; skip 'Cancelled'; return; }
+
+  phase 3 7 'Preparing storage, hostname and protected installer state'
+  if use_longhorn; then apply_storage_plan; else skip 'No Longhorn storage changes requested'; fi
+  set_hostname_if_needed
+  persist_state
+
+  phase 4 7 'Installing the pinned K3s agent'
+  cfg=$(render_k3s_config agent "$JOIN_TOKEN")
+  install_k3s "$cfg" agent
+  JOIN_TOKEN=
+  cfg=
+
+  phase 5 7 'Waiting for the worker node to become Ready'
+  wait_agent_node
+
+  phase 6 7 'Preparing Longhorn host prerequisites'
+  if use_longhorn; then ensure_iscsi; else skip 'Longhorn host prerequisites not selected'; fi
+  info 'Cluster-wide add-ons are not reinstalled on worker nodes.'
+
+  phase 7 7 'Running final health validation'
+  validate_cluster
+}
 promotion_backup(){ local stamp dir; stamp=$(date +%Y%m%d-%H%M%S); dir="/etc/k3s-bootstrap/promotion-backup-$stamp"; as_root install -d -m 700 "$dir"; for item in /etc/rancher/k3s/config.yaml /etc/rancher/node/password /etc/systemd/system/k3s-agent.service /etc/systemd/system/k3s-agent.service.env; do [[ -e $item ]] && as_root cp -a -- "$item" "$dir/"; done; info "Saved protected pre-promotion files in $dir"; }
 promote_agent(){
   NODE_ROLE=${NODE_ROLE:-agent}; TARGET_ROLE='control-plane + etcd + schedulable worker'; phase 1 7 'Verifying that this machine is an existing worker'
@@ -214,13 +432,13 @@ promote_agent(){
   [[ -x /usr/local/bin/k3s-agent-uninstall.sh ]] || die 'Official k3s-agent-uninstall.sh was not found; no removal was attempted.'
   as_root /usr/local/bin/k3s-agent-uninstall.sh
   phase 5 7 'Installing this machine as a manager/server'; local cfg; cfg=$(render_k3s_config join "$JOIN_TOKEN"); install_k3s "$cfg" server; JOIN_TOKEN=; cfg=; NODE_ROLE=server; persist_state
-  phase 6 7 'Waiting for Ready, control-plane and etcd membership'; wait_k3s; wait_local_node; check_kube_vip_interface || warn 'kube-vip requires operator attention'; ensure_iscsi
+  phase 6 7 'Waiting for Ready, control-plane and etcd membership'; wait_k3s; wait_local_node; check_kube_vip_interface || warn 'kube-vip requires operator attention'; if use_longhorn; then ensure_iscsi; else skip 'Longhorn host prerequisites not selected'; fi
   phase 7 7 'Running final health and quorum-oriented validation'; validate_cluster
 }
 configure_updates_prompt(){ if ! security_updates_supported; then skip "Automatic security-update configuration is not changed on $OS_NAME; use its native update policy."; elif confirm 'Enable security-only unattended upgrades (automatic reboot disabled)?'; then configure_updates; else skip 'Unattended upgrades unchanged'; fi; }
-load_state(){ local state_content; if [[ -r $STATE_FILE ]]; then state_content=$(<"$STATE_FILE"); elif sudo -n test -r "$STATE_FILE" 2>/dev/null; then state_content=$(sudo cat "$STATE_FILE"); else return 0; fi; while IFS='=' read -r key value; do case $key in NODE_ROLE|NODE_IP|API_VIP|STORAGE_MODE|STORAGE_DEVICE|LONGHORN_PATH|LONGHORN_DEVICE_UUID) printf -v "$key" '%s' "$value";; esac; done <<<"$state_content"; }
+load_state(){ local state_content; if [[ -r $STATE_FILE ]]; then state_content=$(<"$STATE_FILE"); elif sudo -n test -r "$STATE_FILE" 2>/dev/null; then state_content=$(sudo cat "$STATE_FILE"); else return 0; fi; while IFS='=' read -r key value; do case $key in INSTALL_PROFILE|LOAD_BALANCER_MODE|STORAGE_PROVIDER|NODE_ROLE|NODE_IP|API_VIP|STORAGE_MODE|STORAGE_DEVICE|LONGHORN_PATH|LONGHORN_DEVICE_UUID) printf -v "$key" '%s' "$value";; esac; done <<<"$state_content"; }
 show_main_menu(){
-  printf '\nK3sDeploy Installer %s\n\n1. Create new K3s cluster (Node 1 manager setup)\n2. Join existing K3s cluster as a manager node (control-plane + etcd)\n3. Join K3s cluster as a worker node\n4. Upgrade K3s cluster worker node to manager (control-plane + etcd)\n5. Validate this node and cluster\n6. Repair safe local differences\n7. Exit\n\nFor most clusters use 3 or 5 manager nodes; join remaining machines as workers.\n' "$VERSION"
+  printf '\nK3sDeploy Installer %s\nProfile: %s | Load balancer: %s | Storage: %s\n\n1. Create new K3s cluster (Node 1 manager setup)\n2. Join existing K3s cluster as a manager node (control-plane + etcd)\n3. Join K3s cluster as a worker node\n4. Upgrade K3s cluster worker node to manager (control-plane + etcd)\n5. Validate this node and cluster\n6. Repair safe local differences\n7. Exit\n\nFor most clusters use 3 or 5 manager nodes; join remaining machines as workers.\n' "$VERSION" "$INSTALL_PROFILE" "$LOAD_BALANCER_MODE" "$STORAGE_PROVIDER"
 }
 dispatch_action(){
   local action=$1
@@ -235,7 +453,7 @@ dispatch_action(){
     return
   fi
   require_privileges
-  load_state
+  [[ $action =~ ^[4-6]$ ]] && load_state
   if [[ $action =~ ^[1-3]$ ]] && { [[ $K3S_INSTALLED == yes ]] || as_root_capture test -e "$CONFIG_FILE" || systemctl is-active --quiet k3s || systemctl is-active --quiet k3s-agent; }; then
     die 'Existing K3s state detected. Refusing a fresh installation; choose validation or safe repair instead.'
   fi
@@ -270,6 +488,8 @@ run_menu_action(){
 main(){
   local action
   parse_args "$@"
+  show_banner
+  choose_install_profile || return 0
   while true; do
     preflight_collect
     basic_host_sanity

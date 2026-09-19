@@ -10,11 +10,11 @@ The project favors visible checks and explicit confirmation over unattended dest
 | --- | --- | --- |
 | K3s | `v1.36.4+k3s1` | Kubernetes distribution |
 | kube-vip | `v1.2.3` | Highly available Kubernetes API virtual IP |
-| MetalLB | `v0.16.1` | `LoadBalancer` addresses for applications |
+| MetalLB | `v0.16.1` | Recommended-profile `LoadBalancer` addresses for applications |
 | Traefik | K3s packaged version | HTTP and HTTPS ingress |
-| Longhorn | `v1.12.1` | Replicated persistent storage using the V1 filesystem engine |
+| Longhorn | `v1.12.1` | Recommended-profile replicated persistent storage using the V1 filesystem engine |
 
-Versions are pinned in `config/versions.env`; installations never follow a moving `latest` tag. K3s ServiceLB is disabled because MetalLB owns application load-balancer addresses. kube-vip is used only for the Kubernetes API.
+Versions are pinned in `config/versions.env`; installations never follow a moving `latest` tag. The recommended profile disables K3s ServiceLB because MetalLB owns application load-balancer addresses. K3s local-path remains available alongside Longhorn for compatibility; select the intended StorageClass explicitly for important workloads. The advanced profile can retain either built-in component or leave that responsibility to an external system. kube-vip is used only for the Kubernetes API.
 
 > MetalLB v0.16.1 matches the validated platform, but its released images have a reported fixable gRPC vulnerability as of September 2026. Review upstream security releases and test any pin change before production use.
 
@@ -46,7 +46,7 @@ The installer warns and requests explicit confirmation below the CPU or memory r
 
 ### Storage
 
-Each node needs one of the following:
+When using the recommended profile or choosing Longhorn in the advanced profile, each node needs one of the following:
 
 - An ext4 or XFS root filesystem of at least 120 GiB with at least 60 GiB currently free.
 - A GPT-formatted OS disk with at least 20 GiB plus alignment margin genuinely unallocated for a new Longhorn partition.
@@ -61,7 +61,7 @@ Decide these addresses before installation:
 
 - One fixed Kubernetes API VIP on the same Layer-2 network as the managers.
 - One unique static address per node.
-- A MetalLB range excluded from DHCP and all node/VIP addresses.
+- A MetalLB range excluded from DHCP and all node/VIP addresses when MetalLB is selected.
 
 Allow the required traffic between nodes. Important defaults include TCP `6443` for the API, TCP `2379-2380` between embedded-etcd managers, UDP `8472` for Flannel VXLAN, and TCP `10250` between nodes. Do not expose UDP `8472` to untrusted networks.
 
@@ -163,6 +163,13 @@ cd K3sDeploy-0.1.0
 
 ## Running the installer
 
+K3sDeploy starts with its yellow identity banner and asks for an installation profile before displaying the node-action menu:
+
+- **Recommended installation:** the guided path used throughout this README. K3sDeploy configures kube-vip, MetalLB, and Longhorn.
+- **Advanced/custom installation:** choose MetalLB, built-in K3s ServiceLB, or externally managed load balancing; then choose Longhorn, built-in K3s local-path storage, or externally managed persistent storage.
+
+“External” means K3sDeploy deliberately leaves that component uninstalled. For external storage, it also disables K3s local-storage so an unintended local StorageClass does not compete with the replacement CSI provider. The local-path choice retains K3s's simple node-local provisioner but does not provide Longhorn-style replication or failover. K3sDeploy does not guess how to configure Cilium, a cloud controller, another load balancer, or another CSI provider. Install and validate the selected external system using its own documentation. Use the same advanced choices on every node in one cluster.
+
 Available flags:
 
 ```text
@@ -192,12 +199,12 @@ Input mistakes are recoverable. Invalid addresses, occupied VIPs, rejected join 
 
 Run option 1 on the first manager. The installer:
 
-1. Collects and validates the hostname, node address, API VIP, MetalLB range, and storage choice.
+1. Collects and validates the hostname, node address, API VIP, and the selected load-balancer and storage choices.
 2. Shows a complete preflight and change summary.
 3. Makes no storage change until the operator accepts the summary.
-4. Creates root-owned K3s configuration with ServiceLB disabled and the VIP in the TLS SAN list.
+4. Creates root-owned K3s configuration with the VIP in the TLS SAN list and the selected ServiceLB policy.
 5. Installs the pinned K3s version and waits for authenticated API, Ready, control-plane, and etcd checks.
-6. Installs kube-vip, MetalLB, and Longhorn declaratively.
+6. Installs kube-vip and any supported load-balancer and storage components selected in the profile.
 7. Runs a final health report.
 
 Run option 2 on manager two and manager three, one at a time. Enter the exact API VIP created by option 1 and paste the full secure server token from `sudo cat /var/lib/rancher/k3s/server/token` on a healthy manager. Before collecting hostname or storage choices, K3sDeploy verifies the cluster CA and authenticates against the existing manager. The token is never echoed or written to the general installer state file.
@@ -206,7 +213,7 @@ Run option 3 on remaining workers. Cluster-wide components are not reinstalled; 
 
 ## Longhorn storage choices
 
-All storage modes expose `/var/lib/longhorn`, allowing first servers, joining managers, and workers to use the same Longhorn default path.
+This section applies when Longhorn is selected. All Longhorn storage modes expose `/var/lib/longhorn`, allowing first servers, joining managers, and workers to use the same default path.
 
 ### Option 1: shared root filesystem
 
@@ -294,7 +301,7 @@ Longhorn data is not intentionally removed, but verify healthy replicas and back
 
 ## Validation and safe repair
 
-Option 5 produces a read-only health report covering the OS, network, K3s service, Kubernetes API, node readiness and roles, API VIP, kube-vip, ServiceLB, MetalLB, Traefik, iSCSI, Longhorn, and the expected storage mount/UUID. On a clean node it reports components as `MISSING` or `SKIP` instead of treating software that has never been installed as failed.
+Option 5 produces a read-only health report covering the OS, network, K3s service, Kubernetes API, node readiness and roles, API VIP, kube-vip, ServiceLB, MetalLB, Traefik, iSCSI, Longhorn, and the expected storage mount/UUID. Components intentionally omitted by the advanced profile are reported as `SKIP`. On a clean node, software that has never been installed is reported as `MISSING` or `SKIP` rather than failed.
 
 Option 6 offers only narrow repairs such as starting an existing stopped service or installing `open-iscsi`. On a clean node it explains that there is nothing to repair and points to installation options 1–3; it never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
 
@@ -374,6 +381,7 @@ This project is released under the MIT License. See `LICENSE`.
 
 - [K3s installation requirements](https://docs.k3s.io/installation/requirements)
 - [K3s high availability with embedded etcd](https://docs.k3s.io/datastore/ha-embedded)
+- [K3s packaged components and disable flags](https://docs.k3s.io/installation/packaged-components)
 - [Longhorn v1.12.1 best practices](https://longhorn.io/docs/1.12.1/best-practices/)
 - [Longhorn disk and scheduling settings](https://longhorn.io/docs/1.12.1/references/settings/)
 - [Longhorn filesystem disk configuration](https://longhorn.io/docs/1.12.1/nodes-and-volumes/nodes/multidisk/)

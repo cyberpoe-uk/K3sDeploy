@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-render_k3s_config(){ local mode=$1 token=${2:-}; if [[ $mode == first ]]; then cat <<EOF
+render_k3s_config(){
+  local mode=$1 token=${2:-} component disable_components=
+  local -a disabled=()
+  [[ ${LOAD_BALANCER_MODE:-metallb} == servicelb ]] || disabled+=(servicelb)
+  [[ ${STORAGE_PROVIDER:-longhorn} != external ]] || disabled+=(local-storage)
+  if ((${#disabled[@]})); then
+    disable_components=disable:
+    for component in "${disabled[@]}"; do disable_components+=$'\n  - '"$component"; done
+  fi
+  if [[ $mode == first ]]; then cat <<EOF
 cluster-init: true
 node-ip: $NODE_IP
 advertise-address: $NODE_IP
 tls-san:
   - $API_VIP
-disable:
-  - servicelb
+$disable_components
 EOF
 elif [[ $mode == join ]]; then cat <<EOF
 server: https://$API_VIP:6443
@@ -15,15 +23,15 @@ node-ip: $NODE_IP
 advertise-address: $NODE_IP
 tls-san:
   - $API_VIP
-disable:
-  - servicelb
+$disable_components
 EOF
 else cat <<EOF
 server: https://$API_VIP:6443
 token: "$token"
 node-ip: $NODE_IP
 EOF
-fi; }
+fi
+}
 install_k3s(){ local cfg=$1 role=${2:-server} service=k3s changed=false; [[ $role == agent ]] && service=k3s-agent; write_root_file "$CONFIG_FILE" 600 "$cfg" && changed=true || true
   if ! command -v k3s >/dev/null; then
     $DRY_RUN && { change "Would install K3s $K3S_VERSION"; return; }

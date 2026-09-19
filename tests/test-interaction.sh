@@ -33,8 +33,26 @@ collect_new_cluster_vip <<< $'10.10.10.100\n10.10.10.105\n'
 assert_eq "$API_VIP" 10.10.10.105
 assert_eq "$VIP_CHECKS" 2
 
+configure_advanced_profile <<< $'3\n3'
+assert_eq "$INSTALL_PROFILE" advanced
+assert_eq "$LOAD_BALANCER_MODE" external
+assert_eq "$STORAGE_PROVIDER" external
+prepare_storage_choice
+assert_eq "$STORAGE_MODE" external
+set_recommended_profile
+assert_eq "$LOAD_BALANCER_MODE" metallb
+assert_eq "$STORAGE_PROVIDER" longhorn
+banner_output=$(show_banner)
+assert_ok grep -q 'K3SDEPLOY.*K3sDeploy' <<<"$banner_output"
+
 dispatch_action(){ return 23; }
 assert_ok run_menu_action 1
+
+# Optional clean-node probes must not fail a strict-mode installation workflow.
+findmnt(){ return 1; }
+as_root_capture(){ return 1; }
+CONFIG_FILE=/tmp/k3sdeploy-test-no-config
+assert_ok detect_existing
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 ((fail == 0))
