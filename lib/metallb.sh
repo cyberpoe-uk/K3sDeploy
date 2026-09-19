@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+install_metallb(){ kubectl_local apply -f "https://raw.githubusercontent.com/metallb/metallb/$METALLB_VERSION/config/manifests/metallb-native.yaml"; kubectl_local -n metallb-system rollout status deploy/controller --timeout=300s; local cfg; cfg=$(sed -e "s/__POOL_START__/$POOL_START/g" -e "s/__POOL_END__/$POOL_END/g" "$PROJECT_ROOT/templates/metallb/pool.yaml"); printf '%s' "$cfg" | kubectl_local apply -f -; }
+validate_metallb(){ if kubectl_local -n metallb-system get deploy controller >/dev/null 2>&1; then ok "MetalLB controller exists"; else warn "MetalLB controller missing"; fi; if kubectl_local -n metallb-system get ds speaker >/dev/null 2>&1; then ok "MetalLB speaker exists"; else warn "MetalLB speaker missing"; fi; }

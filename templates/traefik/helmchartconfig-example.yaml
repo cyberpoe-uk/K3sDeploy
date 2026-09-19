@@ -1,0 +1,10 @@
+# Optional example. Set the reserved MetalLB IP, then copy into
+# /var/lib/rancher/k3s/server/manifests/ after checking the packaged chart values.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata: {name: traefik, namespace: kube-system}
+spec:
+  valuesContent: |-
+    service:
+      spec:
+        loadBalancerIP: 10.10.20.80
