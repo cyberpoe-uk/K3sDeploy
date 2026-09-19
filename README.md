@@ -121,15 +121,15 @@ sudo apt-get install -y curl
 ```
 
 ```bash
-bash <(curl -fsSL https://cyberpoe.uk/k3s-deploy-latest)
+bash <(curl -fsSL https://cyberpoe.uk/k3sdeploy-latest)
 ```
 
 For the inspect-before-running form:
 
 ```bash
-curl -fsSLo k3s-deploy-latest https://cyberpoe.uk/k3s-deploy-latest
-less k3s-deploy-latest
-bash k3s-deploy-latest
+curl -fsSLo k3s-deploy-latest https://cyberpoe.uk/k3sdeploy-latest
+less k3sdeploy-latest
+bash k3sdeploy-latest
 ```
 
 The launcher installs Git only after asking permission if Git is missing. It never runs the main installer with `sudo`. Its temporary download is removed when the menu exits, so clone the repository instead if you want to keep the exact files used on the node.
