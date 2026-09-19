@@ -14,12 +14,16 @@ show_storage(){
 
 root_source_device(){ findmnt -no SOURCE / | head -1; }
 
+parse_physical_disks(){ awk '$2 == "disk" { sub(/^.*\/dev\//, "/dev/", $1); if (!seen[$1]++) print $1 }'; }
+
 root_parent_disk(){
-  local device parent
+  local device
+  local -a disks=()
   device=$(readlink -f "$(root_source_device)")
   [[ -b $device ]] || return 1
-  while parent=$(lsblk -ndo PKNAME "$device" 2>/dev/null) && [[ -n $parent ]]; do device="/dev/$parent"; done
-  printf '%s\n' "$device"
+  mapfile -t disks < <(lsblk -srnpo NAME,TYPE "$device" 2>/dev/null | parse_physical_disks)
+  ((${#disks[@]} == 1)) || return 1
+  printf '%s\n' "${disks[0]}"
 }
 
 root_capacity_gib(){
@@ -35,6 +39,14 @@ root_available_gib(){
 }
 
 block_capacity_gib(){ gib_from_bytes "$(lsblk -bdno SIZE "$1")"; }
+
+warn_small_longhorn_capacity(){
+  local size_gib=$1
+  if ((size_gib < LONGHORN_DATA_RECOMMENDED_GIB)); then
+    warn "${size_gib} GiB is suitable only for a small lab or light workloads. This project recommends planning at least ${LONGHORN_DATA_RECOMMENDED_GIB} GiB per storage node for general use."
+    info 'Longhorn capacity is consumed by every replica and snapshot; size the disk from your actual PVC and retention plan.'
+  fi
+}
 
 list_disks(){
   printf '\nAvailable block devices (nothing is selected automatically):\n'
@@ -124,6 +136,7 @@ choose_existing_partition(){
   read -r -p 'Choose a partition number: ' answer
   if [[ ! $answer =~ ^[0-9]+$ ]] || ((answer<1 || answer>${#candidates[@]})); then die "Invalid partition selection"; fi
   STORAGE_MODE=os-partition; STORAGE_DEVICE=${candidates[answer-1]}; STORAGE_DEVICE_MAJMIN=$(lsblk -dnro MAJ:MIN "$STORAGE_DEVICE"); STORAGE_DESCRIPTION="format $STORAGE_DEVICE ($(lsblk -dnro SIZE "$STORAGE_DEVICE")) as ext4, label longhorn-data"; LONGHORN_PATH=$LONGHORN_STANDARD_PATH; LONGHORN_DEVICE_UUID=
+  warn_small_longhorn_capacity "$(block_capacity_gib "$STORAGE_DEVICE")"
   info "Planned Longhorn partition: $STORAGE_DEVICE. No formatting has occurred."
 }
 
@@ -246,7 +259,6 @@ select_os_disk_partition(){
   local root_disk table_type region free_start free_end free_bytes free_gib maximum_gib recommended_gib requested_gib subchoice
   local -a _existing_partitions=()
   root_disk=$(root_parent_disk) || die "Could not safely identify the physical OS disk. Choose a dedicated disk instead."
-  capacity_meets_minimum "$(block_capacity_gib "$root_disk")" "$LONGHORN_ROOT_MIN_GIB" || die "The OS disk is smaller than ${LONGHORN_ROOT_MIN_GIB} GiB; this safety policy requires a second physical disk."
   ensure_parted_for_planning
   table_type=$(partition_table_type "$root_disk")
   [[ $table_type == gpt ]] || die "Guided partition creation supports GPT disks only; $root_disk uses '$table_type'. Choose root storage, a dedicated disk, or prepare a partition manually."
@@ -269,6 +281,7 @@ select_os_disk_partition(){
   read -r -p "Longhorn partition size in GiB [$recommended_gib]: " requested_gib; requested_gib=${requested_gib:-$recommended_gib}
   [[ $requested_gib =~ ^[0-9]+$ ]] || die "Partition size must be a whole number of GiB"
   ((requested_gib>=LONGHORN_DATA_MIN_GIB && requested_gib<=maximum_gib)) || die "Choose a size between ${LONGHORN_DATA_MIN_GIB} and ${maximum_gib} GiB"
+  warn_small_longhorn_capacity "$requested_gib"
   STORAGE_MODE=os-new-partition; STORAGE_DEVICE=$root_disk; STORAGE_DEVICE_MAJMIN=$(lsblk -dnro MAJ:MIN "$root_disk"); STORAGE_DESCRIPTION="create ${requested_gib} GiB ext4 partition named longhorn on $root_disk"; LONGHORN_PATH=$LONGHORN_STANDARD_PATH; LONGHORN_DEVICE_UUID=
   STORAGE_PARTITION_START=$free_start; STORAGE_PARTITION_SIZE_GIB=$requested_gib
   STORAGE_PARTITION_END=$((free_start + requested_gib*1073741824 - 1))
@@ -295,6 +308,7 @@ select_dedicated_disk(){
   if [[ ! $answer =~ ^[0-9]+$ ]] || ((answer<1 || answer>${#candidates[@]})); then die "Invalid disk selection"; fi
   device=${candidates[answer-1]}
   STORAGE_MODE=dedicated-disk; STORAGE_DEVICE=$device; STORAGE_DEVICE_MAJMIN=$(lsblk -dnro MAJ:MIN "$device"); STORAGE_DESCRIPTION="erase $device ($(lsblk -dnro SIZE "$device")), create GPT and ext4 longhorn-data filesystem"; LONGHORN_PATH=$LONGHORN_STANDARD_PATH; LONGHORN_DEVICE_UUID=
+  warn_small_longhorn_capacity "$(block_capacity_gib "$device")"
   info "Planned dedicated Longhorn disk: $device. No partitioning or formatting has occurred."
 }
 
@@ -317,7 +331,9 @@ select_storage(){
   require_storage_inspection_tools
   root_gib=$(root_capacity_gib); available_gib=$(root_available_gib); root_disk=$(root_parent_disk || true)
   [[ -z $root_disk ]] || root_disk_gib=$(block_capacity_gib "$root_disk")
-  if ! capacity_meets_minimum "$root_gib" "$LONGHORN_ROOT_MIN_GIB" || ! capacity_meets_minimum "$available_gib" "$LONGHORN_ROOT_MIN_AVAILABLE_GIB"; then default_choice=3; fi
+  if ! capacity_meets_minimum "$root_gib" "$LONGHORN_ROOT_MIN_GIB" || ! capacity_meets_minimum "$available_gib" "$LONGHORN_ROOT_MIN_AVAILABLE_GIB"; then
+    if [[ -n $root_disk ]]; then default_choice=2; else default_choice=3; fi
+  fi
   cat <<EOF
 
 Longhorn storage
@@ -329,12 +345,13 @@ Detected OS disk:         ${root_disk:-unknown} (${root_disk_gib} GiB)
    Recommended only when root is at least ${LONGHORN_ROOT_MIN_GIB} GiB. Longhorn reserves
    ${LONGHORN_ROOT_RESERVED_PERCENT}% for OS headroom, but this is not a hard quota.
 
-2. Use a separate, already-created partition on the OS disk
-   Better space isolation, but not protection from physical disk failure.
-   The installer never shrinks your live OS partition automatically.
+2. Create or use a separate partition on the OS disk (guided)
+   The installer shows real unallocated space, recommends a size, and guides
+   you through creating the partition. It never shrinks or moves existing data.
 
 3. Use a separate physical disk (recommended for important data)
-   Best isolation. The disk must be empty and at least ${LONGHORN_DATA_MIN_GIB} GiB.
+   Best isolation. The disk must be empty. ${LONGHORN_DATA_RECOMMENDED_GIB} GiB is recommended;
+   the ${LONGHORN_DATA_MIN_GIB} GiB installer floor is intended only for small labs.
 
 All separate storage is mounted by UUID at $LONGHORN_STANDARD_PATH.
 EOF
@@ -344,10 +361,10 @@ EOF
 
 validate_storage_selection(){
   local actual_uuid
-  [[ -d ${LONGHORN_PATH:-$LONGHORN_STANDARD_PATH} ]] || { report 'Longhorn storage path' FAIL 'directory missing'; return 1; }
+  [[ -d ${LONGHORN_PATH:-$LONGHORN_STANDARD_PATH} ]] || { report 'Longhorn storage path' MISSING 'not configured on this node'; return 1; }
   case ${STORAGE_MODE:-unknown} in
     root) report 'Longhorn storage path' OK 'shared root filesystem';;
-    os-partition|dedicated-disk)
+    os-partition|os-new-partition|dedicated-disk)
       if ! findmnt -rn "$LONGHORN_PATH" >/dev/null; then report 'Longhorn storage mount' FAIL 'expected separate filesystem is not mounted'; return 1; fi
       actual_uuid=$(findmnt -no UUID "$LONGHORN_PATH" 2>/dev/null || true)
       if [[ -n ${LONGHORN_DEVICE_UUID:-} && $actual_uuid != "$LONGHORN_DEVICE_UUID" ]]; then report 'Longhorn storage UUID' FAIL 'mounted filesystem differs from installer state'; return 1; fi

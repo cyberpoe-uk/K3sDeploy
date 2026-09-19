@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Clean-node validation now reports uninstalled components as `MISSING` or `SKIP`, and safe repair no longer offers to start a nonexistent K3s service.
+- Manager and worker joins verify the existing API VIP and secure join token before collecting local storage choices.
+- Removed hardcoded lab network addresses; hostname and detected node-address confirmations now include beginner-facing guidance.
+- Corrected physical OS-disk discovery through LVM/device-mapper ancestry and clarified guided OS-partition creation.
+- Replaced the arbitrary 100 GiB Longhorn hard minimum with a 20 GiB small-lab floor plus a 100 GiB general-use recommendation and capacity warning.
+
 ## v0.1.0 - 19-09-2026
 
 - Initial interactive first-server, server-join, validation and safe-repair workflows.
@@ -10,4 +18,4 @@
 - Guarded worker-to-manager promotion with drain/delete instructions, exact destructive confirmation, protected local backup, server-token join, and post-promotion role validation.
 - Three guided Longhorn storage modes with configurable capacity thresholds, standardized UUID mounts, root-space guardrails, and refusal to shrink live OS filesystems.
 - Customer-facing prerequisites and operations guide, immediate existing-K3s warnings, numbered disk selection, and guided GPT partition creation from verified unallocated space.
-- Public repository clone, pinned-release, and archive instructions, plus a normal-user latest-stable launcher for `cyberpoe.uk/k3s-deploy-latest` with tag-to-version verification.
+- Public repository clone, pinned-release, and archive instructions, plus a normal-user latest-stable launcher for `cyberpoe.uk/k3sdeploy-latest` with tag-to-version verification.

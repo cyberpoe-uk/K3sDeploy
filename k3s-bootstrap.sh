@@ -26,6 +26,7 @@ source "$SCRIPT_DIR/lib/updates.sh"
 # shellcheck source=lib/validation.sh
 source "$SCRIPT_DIR/lib/validation.sh"
 trap 'on_error $LINENO' ERR
+trap cleanup_join_check EXIT
 
 usage(){ cat <<EOF
 K3s Bootstrap $VERSION
@@ -40,9 +41,86 @@ EOF
 parse_args(){ while (($#)); do case $1 in --dry-run) DRY_RUN=true;; --verbose) VERBOSE=true;; --yes) ASSUME_YES=true;; --help|-h) usage; exit;; --version) echo "$VERSION"; exit;; *) die "Unknown option: $1";; esac; shift; done; }
 valid_ip_or_die(){ validate_ipv4 "$2" || die "$1 is not a valid IPv4 address: $2"; }
 valid_hostname_or_die(){ [[ ${#1} -le 253 && $1 =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && $1 != *..* ]] || die "Invalid hostname '$1'. Use lowercase letters, numbers, dots or hyphens."; }
-collect_identity(){ local hostname_default; hostname_default=$(short_hostname); hostname_default=${hostname_default,,}; prompt_default DESIRED_HOSTNAME 'Desired hostname' "$hostname_default"; valid_hostname_or_die "$DESIRED_HOSTNAME"; prompt_default NODE_IP 'Node IPv4 address' "$DETECTED_IP"; valid_ip_or_die 'Node IP' "$NODE_IP"; prompt_default API_VIP 'Kubernetes API VIP' '10.10.20.10'; valid_ip_or_die 'API VIP' "$API_VIP"; [[ $NODE_IP != "$API_VIP" ]] || die 'Node IP and API VIP must differ'; same_subnet "$NODE_IP" "$API_VIP" 24 || warn 'VIP and node IP do not share a /24; verify Layer-2 reachability'; }
+collect_local_identity(){
+  local current_hostname
+  current_hostname=$(short_hostname); current_hostname=${current_hostname,,}
+  printf '\nDetected hostname: %s\n' "$current_hostname"
+  if confirm "Keep hostname '$current_hostname'?"; then
+    DESIRED_HOSTNAME=$current_hostname
+  else
+    prompt_required DESIRED_HOSTNAME 'Enter a unique lowercase hostname for this node'
+  fi
+  valid_hostname_or_die "$DESIRED_HOSTNAME"
+
+  [[ -n $DETECTED_IP ]] || die 'No primary IPv4 address was detected. Configure networking, then rerun K3sDeploy.'
+  printf '\nDetected node address: %s on interface %s\n' "$DETECTED_IP" "${PRIMARY_IFACE:-unknown}"
+  info 'Every cluster node needs a stable address, normally provided by a DHCP reservation or static network configuration.'
+  if ! confirm "Use $DETECTED_IP as this node's permanent cluster address?"; then
+    die 'Configure the desired static address or DHCP reservation, restart networking (or reboot), and rerun K3sDeploy.'
+  fi
+  NODE_IP=$DETECTED_IP
+  valid_ip_or_die 'Node IP' "$NODE_IP"
+}
+
+collect_new_cluster_vip(){
+  printf '\nKubernetes API virtual IP (VIP)\n'
+  printf '%s\n' \
+    'This is one unused address that will always lead to the active managers.' \
+    'Choose it from the same Layer-2 network/VLAN as the manager addresses.' \
+    'Reserve it outside DHCP. Do not assign it to a VM, router, or other device.' \
+    'Example only: if this node is 192.168.10.21/24, an unused reserved address such as 192.168.10.20 could be suitable.'
+  prompt_required API_VIP 'Enter the unused API VIP for this new cluster'
+  valid_ip_or_die 'API VIP' "$API_VIP"
+  [[ $NODE_IP != "$API_VIP" ]] || die 'Node IP and API VIP must differ'
+  same_subnet "$NODE_IP" "$API_VIP" 24 || warn 'VIP and node IP do not share a /24. Most kube-vip ARP networks require the same Layer-2 network.'
+  vip_conflict_check "$API_VIP" "$PRIMARY_IFACE"
+  confirm "I confirm $API_VIP is reserved and not assigned to another device" || die 'Reserve an unused VIP before creating the cluster.'
+}
+
+collect_join_access(){
+  local role=$1 token_label
+  printf '\nExisting cluster connection\n'
+  printf '%s\n' \
+    'Enter the exact Kubernetes API VIP created on the first manager.' \
+    'Do not enter this new node address or the address of only one manager.' \
+    'The script will verify the existing cluster and token before asking about storage.'
+  prompt_required API_VIP 'Existing cluster API VIP'
+  valid_ip_or_die 'API VIP' "$API_VIP"
+  port_reachable "$API_VIP" 6443 || die "No K3s API answered at $API_VIP:6443. Create the first manager with option 1, or check the VIP and network."
+  token_label='K3s join token from a healthy manager (input hidden)'
+  if [[ $role == server ]]; then
+    token_label='K3s SERVER token from /var/lib/rancher/k3s/server/token (input hidden)'
+    info 'On a healthy manager, retrieve it with: sudo cat /var/lib/rancher/k3s/server/token'
+  else
+    info 'On a healthy manager, retrieve it with: sudo cat /var/lib/rancher/k3s/server/agent-token'
+  fi
+  printf '%s: ' "$token_label"
+  read -rs JOIN_TOKEN
+  echo
+  [[ -n $JOIN_TOKEN ]] || die 'Join token cannot be empty. No local changes were made.'
+  verify_existing_cluster_token "$role" "$JOIN_TOKEN"
+}
+
+check_identity_network(){
+  [[ $NODE_IP != "$API_VIP" ]] || die 'Node IP and API VIP must differ'
+  same_subnet "$NODE_IP" "$API_VIP" 24 || warn 'VIP and node IP do not share a /24. Verify that this node can reach the VIP and that kube-vip supports the network layout.'
+}
+
+collect_metallb_pool(){
+  printf '\nMetalLB application address pool\n'
+  printf '%s\n' \
+    'Choose a range of unused addresses for applications exposed as LoadBalancer services.' \
+    'The entire range must be reserved outside DHCP and must not contain any node address or the API VIP.'
+  prompt_required POOL_START 'First MetalLB address'
+  prompt_required POOL_END 'Last MetalLB address'
+  valid_ip_or_die start "$POOL_START"; valid_ip_or_die end "$POOL_END"
+  (( $(ip_to_int "$POOL_START") <= $(ip_to_int "$POOL_END") )) || die 'MetalLB range is reversed'
+  ip_in_range "$API_VIP" "$POOL_START" "$POOL_END" && die 'API VIP overlaps MetalLB pool'
+  ip_in_range "$NODE_IP" "$POOL_START" "$POOL_END" && die 'Node IP overlaps MetalLB pool'
+  confirm 'I confirm this entire MetalLB range is unused and excluded from DHCP' || die 'Reserve the pool before continuing'
+}
 persist_state(){ local body; body=$(printf 'NODE_ROLE=%s\nNODE_IP=%s\nAPI_VIP=%s\nSTORAGE_MODE=%s\nSTORAGE_DEVICE=%s\nLONGHORN_PATH=%s\nLONGHORN_DEVICE_UUID=%s\nMETALLB_MODE=l2\n' "${NODE_ROLE:-server}" "$NODE_IP" "$API_VIP" "$STORAGE_MODE" "${STORAGE_DEVICE:-}" "$LONGHORN_PATH" "${LONGHORN_DEVICE_UUID:-}"); write_root_file "$STATE_FILE" 600 "$body" || true; }
-set_hostname_if_needed(){ [[ $(short_hostname) == "$DESIRED_HOSTNAME" ]] && return; need_cmd hostnamectl; confirm "Change hostname to $DESIRED_HOSTNAME?" || die 'Hostname change declined'; as_root hostnamectl set-hostname "$DESIRED_HOSTNAME"; }
+set_hostname_if_needed(){ [[ $(short_hostname) == "$DESIRED_HOSTNAME" ]] && return; need_cmd hostnamectl; info "Changing this node hostname to $DESIRED_HOSTNAME as shown in the accepted plan"; as_root hostnamectl set-hostname "$DESIRED_HOSTNAME"; }
 summary(){ cat <<EOF
 
 K3s Bootstrap $VERSION
@@ -58,11 +136,11 @@ K3s Bootstrap $VERSION
   LoadBalancer:     $2
 EOF
 }
-new_cluster(){ NODE_ROLE=server; TARGET_ROLE='control-plane + etcd + schedulable worker'; phase 1 8 'Collecting node, network and storage choices'; collect_identity; select_storage; prompt_default POOL_START 'MetalLB pool start' '10.10.20.80'; prompt_default POOL_END 'MetalLB pool end' '10.10.20.99'; valid_ip_or_die start "$POOL_START"; valid_ip_or_die end "$POOL_END"; (( $(ip_to_int "$POOL_START") <= $(ip_to_int "$POOL_END") )) || die 'MetalLB range is reversed'; ip_in_range "$API_VIP" "$POOL_START" "$POOL_END" && die 'API VIP overlaps MetalLB pool'; ip_in_range "$NODE_IP" "$POOL_START" "$POOL_END" && die 'Node IP overlaps MetalLB pool'; confirm 'Is this pool excluded from DHCP/reserved?' || die 'Reserve the pool before continuing'; LONGHORN_REPLICAS=1
+new_cluster(){ NODE_ROLE=server; TARGET_ROLE='control-plane + etcd + schedulable worker'; phase 1 8 'Collecting node, network and storage choices'; collect_local_identity; collect_new_cluster_vip; select_storage; collect_metallb_pool; LONGHORN_REPLICAS=1
   phase 2 8 'Reviewing preflight checks and planned changes'; summary 'Create new K3s cluster / first server' "$POOL_START-$POOL_END"; preflight_show; detect_existing; [[ $K3S_INSTALLED == no && ! -f $CONFIG_FILE ]] || die 'Existing K3s detected. Use validate/repair; refusing to initialize over it.'; [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to initialize a new cluster over it.'; confirm Proceed? || { skip Cancelled; return; }; phase 3 8 'Preparing storage, hostname and protected installer state'; apply_storage_plan; set_hostname_if_needed; persist_state; phase 4 8 'Installing the pinned K3s first server'; install_k3s "$(render_k3s_config first)" server; wait_k3s; wait_local_node; phase 5 8 'Installing the kube-vip API virtual address'; install_kube_vip; phase 6 8 'Installing MetalLB for application addresses'; install_metallb; phase 7 8 'Installing Longhorn and host storage prerequisites'; install_longhorn; configure_updates_prompt; phase 8 8 'Running final health validation'; validate_cluster; }
-join_cluster(){ NODE_ROLE=server; TARGET_ROLE='control-plane + etcd + schedulable worker'; phase 1 8 'Collecting server join choices'; collect_identity; port_reachable "$API_VIP" 6443 || die "API VIP $API_VIP:6443 is unreachable"; printf 'K3s SERVER token (input hidden; an agent-only token cannot add a manager): '; read -rs JOIN_TOKEN; echo; [[ -n $JOIN_TOKEN ]] || die 'Join token cannot be empty'; select_storage
+join_cluster(){ NODE_ROLE=server; TARGET_ROLE='control-plane + etcd + schedulable worker'; phase 1 8 'Verifying cluster, then collecting manager choices'; collect_join_access server; collect_local_identity; check_identity_network; select_storage
   phase 2 8 'Checking the existing cluster and local node'; summary 'Join existing HA cluster' 'existing MetalLB cluster'; preflight_show; detect_existing; if [[ $K3S_INSTALLED == yes || -f $CONFIG_FILE ]]; then die 'Existing K3s/config detected. Use validate/repair; refusing to overwrite or rejoin.'; fi; [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to join over it without manual recovery review.'; confirm Proceed? || { JOIN_TOKEN=; skip Cancelled; return; }; phase 3 8 'Preparing storage, hostname and protected installer state'; apply_storage_plan; set_hostname_if_needed; persist_state; phase 4 8 'Installing K3s and joining embedded etcd'; local cfg; cfg=$(render_k3s_config join "$JOIN_TOKEN"); install_k3s "$cfg" server; JOIN_TOKEN=; cfg=; phase 5 8 'Waiting for Ready, control-plane and etcd roles'; wait_k3s; wait_local_node; phase 6 8 'Checking kube-vip compatibility on this server'; check_kube_vip_interface || warn 'kube-vip requires operator attention'; phase 7 8 'Preparing storage and checking cluster-wide services'; ensure_iscsi; info 'Cluster-wide kube-vip, MetalLB, Traefik and Longhorn are inspected, not reinstalled.'; phase 8 8 'Running final health validation'; validate_cluster; }
-join_agent(){ NODE_ROLE=agent; TARGET_ROLE='worker/agent (no control-plane or etcd)'; phase 1 7 'Collecting worker join choices'; collect_identity; port_reachable "$API_VIP" 6443 || die "API VIP $API_VIP:6443 is unreachable"; printf 'K3s join token (input hidden): '; read -rs JOIN_TOKEN; echo; [[ -n $JOIN_TOKEN ]] || die 'Join token cannot be empty'; select_storage
+join_agent(){ NODE_ROLE=agent; TARGET_ROLE='worker/agent (no control-plane or etcd)'; phase 1 7 'Verifying cluster, then collecting worker choices'; collect_join_access agent; collect_local_identity; check_identity_network; select_storage
   phase 2 7 'Checking the existing cluster and local node'; summary 'Join existing cluster as worker/agent' 'existing MetalLB cluster'; preflight_show; detect_existing; if [[ $K3S_INSTALLED == yes || -f $CONFIG_FILE ]]; then die 'Existing K3s/config detected. Use validate/repair; refusing to overwrite or rejoin.'; fi; [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to join over it without manual recovery review.'; confirm Proceed? || { JOIN_TOKEN=; skip Cancelled; return; }; phase 3 7 'Preparing storage, hostname and protected installer state'; apply_storage_plan; set_hostname_if_needed; persist_state; phase 4 7 'Installing the pinned K3s agent'; local cfg; cfg=$(render_k3s_config agent "$JOIN_TOKEN"); install_k3s "$cfg" agent; JOIN_TOKEN=; cfg=; phase 5 7 'Waiting for the worker node to become Ready'; wait_agent_node; phase 6 7 'Preparing Longhorn host prerequisites'; ensure_iscsi; info 'Cluster-wide add-ons are not reinstalled on worker nodes.'; phase 7 7 'Running final health validation'; validate_cluster; }
 promotion_backup(){ local stamp dir; stamp=$(date +%Y%m%d-%H%M%S); dir="/etc/k3s-bootstrap/promotion-backup-$stamp"; as_root install -d -m 700 "$dir"; for item in /etc/rancher/k3s/config.yaml /etc/rancher/node/password /etc/systemd/system/k3s-agent.service /etc/systemd/system/k3s-agent.service.env; do [[ -e $item ]] && as_root cp -a -- "$item" "$dir/"; done; info "Saved protected pre-promotion files in $dir"; }
 promote_agent(){
@@ -72,7 +150,11 @@ promote_agent(){
   systemctl is-active --quiet k3s && die 'k3s server is already active; this node is not a worker-only node.'
   DESIRED_HOSTNAME=$(short_hostname); NODE_IP=${NODE_IP:-$(awk '$1=="node-ip:"{print $2; exit}' "$CONFIG_FILE" 2>/dev/null || true)}
   [[ -n ${NODE_IP:-} ]] || prompt_default NODE_IP 'Node IPv4 address' "$DETECTED_IP"; valid_ip_or_die 'Node IP' "$NODE_IP"
-  [[ -n ${API_VIP:-} ]] || prompt_default API_VIP 'Kubernetes API VIP' '10.10.20.10'; valid_ip_or_die 'API VIP' "$API_VIP"; port_reachable "$API_VIP" 6443 || die "API VIP $API_VIP:6443 is unreachable"
+  if [[ -z ${API_VIP:-} ]]; then
+    info 'Enter the exact API VIP already used by this worker. Do not choose a new address.'
+    prompt_required API_VIP 'Existing cluster API VIP'
+  fi
+  valid_ip_or_die 'API VIP' "$API_VIP"; port_reachable "$API_VIP" 6443 || die "API VIP $API_VIP:6443 is unreachable"
   phase 2 7 'Confirming cluster-side drain and node removal'
   warn 'Promotion briefly removes this machine from Kubernetes and reinstalls its local K3s role.'
   warn 'The official agent uninstaller removes local K3s state, kubelet state, emptyDir data, and local-path PV data.'
@@ -92,5 +174,40 @@ promote_agent(){
 }
 configure_updates_prompt(){ if confirm 'Enable security-only unattended upgrades (automatic reboot disabled)?'; then configure_updates; else skip 'Unattended upgrades unchanged'; fi; }
 load_state(){ local state_content; if [[ -r $STATE_FILE ]]; then state_content=$(<"$STATE_FILE"); elif sudo -n test -r "$STATE_FILE" 2>/dev/null; then state_content=$(sudo cat "$STATE_FILE"); else return 0; fi; while IFS='=' read -r key value; do case $key in NODE_ROLE|NODE_IP|API_VIP|STORAGE_MODE|STORAGE_DEVICE|LONGHORN_PATH|LONGHORN_DEVICE_UUID) printf -v "$key" '%s' "$value";; esac; done <<<"$state_content"; }
-main(){ parse_args "$@"; preflight_collect; basic_host_sanity; announce_existing_k3s; printf '\nK3s Bootstrap %s\n\n1. Create new K3s cluster (Node 1 manager setup)\n2. Join existing K3s cluster as a manager node (control-plane + etcd)\n3. Join K3s cluster as a worker node\n4. Upgrade K3s cluster worker node to manager (control-plane + etcd)\n5. Validate this node and cluster\n6. Repair safe local differences\n7. Exit\n\nFor most clusters use 3 or 5 manager nodes; join remaining machines as workers.\n' "$VERSION"; read -r -p 'Selection: ' action; [[ $action == 7 ]] && exit 0; [[ $action =~ ^[1-6]$ ]] || die 'Invalid selection'; require_privileges; load_state; if [[ $action =~ ^[1-3]$ ]] && { [[ $K3S_INSTALLED == yes ]] || as_root_capture test -e "$CONFIG_FILE" || systemctl is-active --quiet k3s || systemctl is-active --quiet k3s-agent; }; then die 'Existing K3s state detected. Refusing a fresh installation; choose validation or safe repair instead.'; fi; case $action in 1)new_cluster;; 2)join_cluster;; 3)join_agent;; 4)promote_agent;; 5)phase 1 1 'Running read-only node and cluster validation'; validate_cluster;; 6)phase 1 1 'Checking and offering only safe repairs'; safe_repair;; esac; }
+main(){
+  local action
+  parse_args "$@"
+  preflight_collect
+  basic_host_sanity
+  announce_existing_k3s
+  printf '\nK3s Bootstrap %s\n\n1. Create new K3s cluster (Node 1 manager setup)\n2. Join existing K3s cluster as a manager node (control-plane + etcd)\n3. Join K3s cluster as a worker node\n4. Upgrade K3s cluster worker node to manager (control-plane + etcd)\n5. Validate this node and cluster\n6. Repair safe local differences\n7. Exit\n\nFor most clusters use 3 or 5 manager nodes; join remaining machines as workers.\n' "$VERSION"
+  read -r -p 'Selection: ' action
+  [[ $action == 7 ]] && exit 0
+  [[ $action =~ ^[1-6]$ ]] || die 'Invalid selection'
+
+  if [[ $action == 5 ]] && ! k3s_local_installation_present; then
+    phase 1 1 'Running read-only first-use validation'
+    validate_cluster
+    return
+  fi
+  if [[ $action == 6 ]] && ! k3s_local_installation_present; then
+    phase 1 1 'Checking whether this clean node needs repair'
+    safe_repair
+    return
+  fi
+
+  require_privileges
+  load_state
+  if [[ $action =~ ^[1-3]$ ]] && { [[ $K3S_INSTALLED == yes ]] || as_root_capture test -e "$CONFIG_FILE" || systemctl is-active --quiet k3s || systemctl is-active --quiet k3s-agent; }; then
+    die 'Existing K3s state detected. Refusing a fresh installation; choose validation or safe repair instead.'
+  fi
+  case $action in
+    1) new_cluster;;
+    2) join_cluster;;
+    3) join_agent;;
+    4) promote_agent;;
+    5) phase 1 1 'Running read-only node and cluster validation'; validate_cluster;;
+    6) phase 1 1 'Checking and offering only safe repairs'; safe_repair;;
+  esac
+}
 main "$@"

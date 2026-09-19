@@ -35,11 +35,22 @@ assert_ok capacity_meets_minimum 121 120
 assert_bad capacity_meets_minimum 119 120
 assert_eq "$(partition_path /dev/sda 3)" /dev/sda3
 assert_eq "$(partition_path /dev/nvme0n1 3)" /dev/nvme0n1p3
+assert_eq "$(printf '%s\n' '/dev/dm-0 lvm' '└─/dev/sda3 part' '  └─/dev/sda disk' | parse_physical_disks)" /dev/sda
 parted_sample='BYT;
 /dev/sda:536870912000B:scsi:512:4096:gpt:Example Disk:;
 :17408B:1048575B:1031168B:free;
 1:1048576B:107375230975B:107374182400B:ext4::;
 :107375230976B:536869863423B:429494632448B:free;'
 assert_eq "$(printf '%s\n' "$parted_sample" | parse_largest_free_region)" '107375230976 536869863423 429494632448'
+# shellcheck source=../lib/validation.sh
+source "$ROOT/lib/validation.sh"
+k3s_local_installation_present(){ return 1; }
+fresh_report=$(validate_cluster)
+assert_ok grep -Eq '^K3s service[[:space:]]+MISSING' <<<"$fresh_report"
+assert_ok grep -Eq '^Longhorn[[:space:]]+MISSING' <<<"$fresh_report"
+assert_bad grep -Eq '^K3s service[[:space:]]+FAIL' <<<"$fresh_report"
+repair_report=$(safe_repair)
+assert_ok grep -q 'There is nothing to repair on this clean node' <<<"$repair_report"
+assert_bad grep -q 'Start inactive' <<<"$repair_report"
 echo "$pass passed, $fail failed"
 ((fail==0))

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # K3sDeploy latest stable-release bootstrapper.
-# This file is also published at https://cyberpoe.uk/k3s-deploy-latest.
+# This file is also published at https://cyberpoe.uk/k3sdeploy-latest.
 
 set -Eeuo pipefail
 

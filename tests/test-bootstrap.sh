@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-# shellcheck source=../bootstrap.sh
-source "$ROOT/bootstrap.sh"
+# shellcheck source=../k3sdeploy-latest.sh
+source "$ROOT/k3sdeploy-latest.sh"
 
 pass=0
 fail=0
@@ -88,7 +88,7 @@ git() {
 }
 assert_eq "$(latest_stable_tag)" ''
 
-assert_ok bash -n "$ROOT/bootstrap.sh"
+assert_ok bash -n "$ROOT/k3sdeploy-latest.sh"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 ((fail == 0))

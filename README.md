@@ -49,10 +49,10 @@ The installer warns and requests explicit confirmation below the CPU or memory r
 Each node needs one of the following:
 
 - An ext4 or XFS root filesystem of at least 120 GiB with at least 60 GiB currently free.
-- A GPT-formatted OS disk with at least 100 GiB plus alignment margin genuinely unallocated for a new Longhorn partition.
-- An empty separate physical disk of at least 100 GiB.
+- A GPT-formatted OS disk with at least 20 GiB plus alignment margin genuinely unallocated for a new Longhorn partition.
+- An empty separate physical disk of at least 20 GiB.
 
-These are conservative installer defaults, not universal workload-sizing guarantees. Change them deliberately in `config/defaults.env` when your capacity plan requires different values.
+Longhorn and K3s do not define one universal capacity minimum because the correct size depends on PVC sizes, replicas, snapshots, backups, and expected growth. K3sDeploy uses 20 GiB as a small-lab installation floor and recommends planning at least 100 GiB per storage node for general use. These are project guardrails, not upstream guarantees. Change them deliberately in `config/defaults.env` when your capacity plan requires different values.
 
 ### Network planning
 
@@ -127,7 +127,7 @@ bash <(curl -fsSL https://cyberpoe.uk/k3sdeploy-latest)
 For the inspect-before-running form:
 
 ```bash
-curl -fsSLo k3s-deploy-latest https://cyberpoe.uk/k3sdeploy-latest
+curl -fsSLo k3sdeploy-latest https://cyberpoe.uk/k3sdeploy-latest
 less k3sdeploy-latest
 bash k3sdeploy-latest
 ```
@@ -182,7 +182,7 @@ Run option 1 on the first manager. The installer:
 6. Installs kube-vip, MetalLB, and Longhorn declaratively.
 7. Runs a final health report.
 
-Run option 2 on manager two and manager three, one at a time. Paste the server token at the hidden prompt. The token is never echoed or written to the general installer state file.
+Run option 2 on manager two and manager three, one at a time. Enter the exact API VIP created by option 1 and paste the full secure server token from `sudo cat /var/lib/rancher/k3s/server/token` on a healthy manager. Before collecting hostname or storage choices, K3sDeploy verifies the cluster CA and authenticates against the existing manager. The token is never echoed or written to the general installer state file.
 
 Run option 3 on remaining workers. Cluster-wide components are not reinstalled; the script prepares local prerequisites and waits until the worker is registered and Ready.
 
@@ -211,7 +211,7 @@ The installer can guide creation of a Longhorn partition without resizing existi
 1. It identifies the physical OS disk and requires a GPT partition table.
 2. It reads the partition table and finds the largest genuinely unallocated region.
 3. It reports the available GiB and recommends using the region minus approximately 1 GiB for alignment and recovery margin.
-4. It asks for the desired whole-number partition size, with a minimum of 100 GiB.
+4. It asks for the desired whole-number partition size, with a 20 GiB small-lab floor and a warning below the 100 GiB general-use recommendation.
 5. It records the plan but changes nothing until the complete installation summary is accepted.
 6. It rechecks that the same byte range is still unallocated.
 7. It requires the operator to type an exact `CREATE ... ON /dev/...` confirmation.
@@ -219,7 +219,7 @@ The installer can guide creation of a Longhorn partition without resizing existi
 
 If the standard `parted` utility is missing, the installer explains why it is needed and asks before installing the Ubuntu package. Installing that utility does not alter the partition table.
 
-The installer never shrinks, moves, or reformats an existing OS partition. If no unallocated region exists, create space using an appropriate offline/rescue workflow or choose a separate disk. An already-created empty partition of at least 100 GiB can also be selected from a numbered list.
+The installer never shrinks, moves, or reformats an existing OS partition. If no unallocated region exists, create space using an appropriate offline/rescue workflow or choose a separate disk. An already-created empty partition of at least 20 GiB can also be selected from a numbered list.
 
 If partition creation succeeds but Linux cannot expose the new device immediately, the installer stops with recovery instructions. Reboot and rerun; the empty partition will be offered as an existing candidate instead of creating another blindly.
 
@@ -230,7 +230,7 @@ This is the recommended choice for important data. The installer displays a numb
 - Are not the OS disk.
 - Have no partitions.
 - Have no partition table, filesystem signature, or mount.
-- Are at least 100 GiB.
+- Are at least 20 GiB. Disks below the 100 GiB general-use recommendation receive a clear capacity warning.
 
 The operator selects a number, reviews the complete plan, and must then type the exact disk path before any destructive action. The installer creates GPT, one ext4 partition, label `longhorn-data`, and a UUID-based `/etc/fstab` mount.
 
@@ -255,9 +255,9 @@ Longhorn data is not intentionally removed, but verify healthy replicas and back
 
 ## Validation and safe repair
 
-Option 5 produces a read-only health report covering the OS, network, K3s service, Kubernetes API, node readiness and roles, API VIP, kube-vip, ServiceLB, MetalLB, Traefik, iSCSI, Longhorn, and the expected storage mount/UUID.
+Option 5 produces a read-only health report covering the OS, network, K3s service, Kubernetes API, node readiness and roles, API VIP, kube-vip, ServiceLB, MetalLB, Traefik, iSCSI, Longhorn, and the expected storage mount/UUID. On a clean node it reports components as `MISSING` or `SKIP` instead of treating software that has never been installed as failed.
 
-Option 6 offers only narrow repairs such as starting a stopped service or installing `open-iscsi`. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
+Option 6 offers only narrow repairs such as starting an existing stopped service or installing `open-iscsi`. On a clean node it explains that there is nothing to repair and points to installation options 1–3; it never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
 
 ## Safety and idempotency
 
@@ -295,7 +295,7 @@ K3s manages packaged Traefik. Reserve a specific MetalLB address using a K3s `He
 Static and unit checks:
 
 ```bash
-shellcheck bootstrap.sh k3s-bootstrap.sh lib/*.sh tests/*.sh
+shellcheck k3sdeploy-latest.sh k3s-bootstrap.sh lib/*.sh tests/*.sh
 bash tests/test-bootstrap.sh
 bash tests/test-functions.sh
 ```
@@ -310,18 +310,6 @@ The optional `tests/smoke-longhorn.sh` test creates a small PVC, writes a unique
 - The installer does not restore etcd snapshots, Longhorn backups, or application manifests.
 - Guided same-disk partition creation supports GPT only and consumes existing unallocated space; it does not shrink filesystems.
 - Address-conflict and Layer-2 checks reduce common mistakes but cannot prove the surrounding network configuration is correct.
-
-## Publishing releases
-
-This section is for project maintainers, not cluster operators.
-
-1. Update `VERSION` and `CHANGELOG.md`, and run all tests.
-2. Commit the release, then create a stable semantic-version tag that exactly matches `VERSION`, for example `v0.1.0`.
-3. Push the commit and tag to `https://github.com/cyberpoe-uk/K3sDeploy`.
-4. Publish `bootstrap.sh` unchanged at `https://cyberpoe.uk/k3s-deploy-latest`.
-5. Download the public endpoint, compare it with `bootstrap.sh`, and test it on a disposable supported Ubuntu node before announcing the release.
-
-The launcher deliberately selects tags shaped like `vMAJOR.MINOR.PATCH` (or the same form without `v`) and rejects a release when its tag and `VERSION` disagree. This prevents the convenient URL from silently running the default development branch.
 
 ## Troubleshooting
 

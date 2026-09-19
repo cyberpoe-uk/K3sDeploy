@@ -57,4 +57,10 @@ ip_to_int(){ local IFS=. a b c d; read -r a b c d <<<"$1"; printf '%u' "$((a*167
 ip_in_range(){ local x s e; x=$(ip_to_int "$1"); s=$(ip_to_int "$2"); e=$(ip_to_int "$3"); (( x>=s && x<=e )); }
 same_subnet(){ local a=$1 b=$2 prefix=${3:-24}; (( prefix == 24 )) && [[ ${a%.*} == "${b%.*}" ]]; }
 prompt_default(){ local var=$1 prompt=$2 default=$3 value; read -r -p "$prompt [$default]: " value; printf -v "$var" '%s' "${value:-$default}"; }
+prompt_required(){
+  local var=$1 prompt=$2 value
+  read -r -p "$prompt: " value
+  [[ -n $value ]] || die "$prompt cannot be empty"
+  printf -v "$var" '%s' "$value"
+}
 ensure_log(){ if [[ $EUID -eq 0 ]]; then mkdir -p "${LOG_FILE%/*}"; touch "$LOG_FILE"; chmod 600 "$LOG_FILE"; elif sudo -n true 2>/dev/null; then sudo mkdir -p "${LOG_FILE%/*}"; sudo touch "$LOG_FILE"; sudo chmod 600 "$LOG_FILE"; fi; }
