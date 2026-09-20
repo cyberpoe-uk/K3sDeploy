@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stop repeatedly offering an already-completed Longhorn repair by comparing each workload's available replicas with its configured desired count instead of assuming every deployment has exactly one replica.
+- Restore installer colours by detecting the output terminal before colour command substitutions redirect stdout, and add `--color` to override an inherited `NO_COLOR` setting.
 - Add terminal-aware arrow-key menus with Enter/Space confirmation and automatic numbered-prompt fallback for redirected or non-interactive sessions.
 - Extend the K3sDeploy yellow identity colour to section titles and progress panels, with distinct cyan information, green success, orange warning, and red error/failed-check output plus `NO_COLOR` support.
 - End successful menu workflows with an action-specific summary and normal installer exit, while retaining the menu after recoverable failures.

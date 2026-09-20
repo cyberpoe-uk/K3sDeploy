@@ -9,7 +9,10 @@ YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
-if [[ ! -t 1 || ${TERM:-dumb} == dumb || -n ${NO_COLOR:-} ]]; then YELLOW=; GREEN=; RED=; NC=; fi
+
+enable_launcher_colours() { YELLOW='\033[1;33m'; GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'; }
+disable_launcher_colours() { YELLOW=; GREEN=; RED=; NC=; }
+if [[ ! -t 1 || ${TERM:-dumb} == dumb || -n ${NO_COLOR:-} ]]; then disable_launcher_colours; fi
 
 readonly REPOSITORY_URL="${K3S_DEPLOY_REPOSITORY_URL:-https://github.com/cyberpoe-uk/K3sDeploy.git}"
 TEMP_DIR=""
@@ -112,12 +115,19 @@ latest_stable_tag() {
 }
 
 main() {
-    local tag release_version argument
+    local tag release_version argument colour_choice=auto
     trap cleanup EXIT
 
     for argument in "$@"; do
-        if [[ $argument == --no-color ]]; then YELLOW=; GREEN=; RED=; NC=; break; fi
+        case $argument in
+            --color) colour_choice=on ;;
+            --no-color) colour_choice=off ;;
+        esac
     done
+    case $colour_choice in
+        on) [[ -t 1 && ${TERM:-dumb} != dumb ]] && enable_launcher_colours ;;
+        off) disable_launcher_colours ;;
+    esac
 
     info "Starting the K3sDeploy launcher."
     info "It will download the latest stable tagged release and open its interactive menu."

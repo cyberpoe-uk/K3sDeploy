@@ -75,6 +75,17 @@ assert_eq "$(grep -c '10.10.10.110' <<<"$plan_output")" 1
 
 kubectl_local(){
   case "$*" in
+    'get namespace longhorn-system') return 0;;
+    '-n longhorn-system get deployment longhorn-driver-deployer -o jsonpath={.spec.replicas}{"|"}{.status.availableReplicas}') printf '1|1';;
+    '-n longhorn-system get deployment longhorn-ui -o jsonpath={.spec.replicas}{"|"}{.status.availableReplicas}') printf '2|2';;
+    '-n longhorn-system get daemonset longhorn-manager -o jsonpath={.status.desiredNumberScheduled}{"|"}{.status.numberReady}') printf '1|1';;
+    *) return 1;;
+  esac
+}
+assert_ok longhorn_installation_ready
+
+kubectl_local(){
+  case "$*" in
     'get --raw=/readyz') return 0;;
     '-n metallb-system get deploy controller -o jsonpath={.status.availableReplicas}') printf '1';;
     '-n metallb-system get daemonset speaker -o jsonpath={.status.numberReady}') printf '1';;

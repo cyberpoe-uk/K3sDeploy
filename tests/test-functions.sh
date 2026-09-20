@@ -33,6 +33,9 @@ OS_PACKAGE_MANAGER=apt
 assert_ok confirm_yes <<< ''
 assert_ok confirm_yes <<< 'yes'
 assert_bad confirm_yes <<< 'n'
+assert_eq "$(K3SDEPLOY_STDOUT_IS_TTY=true TERM=xterm-256color NO_COLOR= K3SDEPLOY_FORCE_COLOR=false colour '1;33')" $'\033[1;33m'
+assert_eq "$(K3SDEPLOY_STDOUT_IS_TTY=true TERM=xterm-256color NO_COLOR=1 K3SDEPLOY_FORCE_COLOR=false colour '1;33')" ''
+assert_eq "$(K3SDEPLOY_STDOUT_IS_TTY=true TERM=xterm-256color NO_COLOR=1 K3SDEPLOY_FORCE_COLOR=true colour '1;33')" $'\033[1;33m'
 MENU_TEST=
 menu_select MENU_TEST 'Test menu' 2 'First choice' 'Second choice' 'Third choice' <<< ''
 assert_eq "$MENU_TEST" 2
@@ -73,6 +76,13 @@ assert_bad grep -q '^advertise-address:' <<<"$agent_rendered"
 assert_bad grep -q '^disable:' <<<"$agent_rendered"
 source "$ROOT/config/defaults.env"
 source "$ROOT/lib/storage.sh"
+source "$ROOT/lib/longhorn.sh"
+assert_ok replica_counts_ready 1 1
+assert_ok replica_counts_ready 2 2
+assert_ok replica_counts_ready 1 2
+assert_bad replica_counts_ready 2 1
+assert_bad replica_counts_ready 0 0
+assert_bad replica_counts_ready missing 2
 assert_eq "$(gib_from_bytes 107374182400)" 100
 assert_ok capacity_meets_minimum 120 120
 assert_ok capacity_meets_minimum 121 120

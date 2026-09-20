@@ -4,6 +4,8 @@ readonly K3S_BOOTSTRAP_COMMON_LOADED=1
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd); readonly PROJECT_ROOT
 VERSION=$(<"$PROJECT_ROOT/VERSION"); readonly VERSION; export VERSION
 DRY_RUN=${DRY_RUN:-false}; VERBOSE=${VERBOSE:-false}; ASSUME_YES=${ASSUME_YES:-false}
+K3SDEPLOY_FORCE_COLOR=${K3SDEPLOY_FORCE_COLOR:-false}
+if [[ -t 1 ]]; then K3SDEPLOY_STDOUT_IS_TTY=true; else K3SDEPLOY_STDOUT_IS_TTY=false; fi
 INSTALL_PROFILE=${INSTALL_PROFILE:-recommended}
 LOAD_BALANCER_MODE=${LOAD_BALANCER_MODE:-metallb}
 STORAGE_PROVIDER=${STORAGE_PROVIDER:-longhorn}
@@ -78,9 +80,17 @@ package_for(){
   esac
 }
 
-terminal_colours(){ [[ -t 1 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; }
+terminal_colours(){
+  [[ $K3SDEPLOY_STDOUT_IS_TTY == true && ${TERM:-dumb} != dumb ]] || return 1
+  [[ $K3SDEPLOY_FORCE_COLOR == true || -z ${NO_COLOR:-} ]]
+}
 interactive_terminal(){ [[ -t 0 && -t 1 && ${TERM:-dumb} != dumb && ${K3SDEPLOY_PLAIN_MENU:-0} != 1 ]]; }
 colour() { terminal_colours && printf '\033[%sm' "$1" || true; }
+explain_colour_mode(){
+  if [[ $K3SDEPLOY_STDOUT_IS_TTY == true && ${TERM:-dumb} != dumb && -n ${NO_COLOR:-} && $K3SDEPLOY_FORCE_COLOR != true ]]; then
+    printf '%s\n' '[K3SDEPLOY] Colours are disabled because NO_COLOR is set. Run with --color to override it for this session.'
+  fi
+}
 log() { local level=$1 colour_code=$2; shift 2; printf '%s[%s] %-6s%s %s\n' "$(colour "$colour_code")" "$(date '+%F %T')" "$level" "$(colour 0)" "$*"; [[ -w ${LOG_FILE%/*} ]] && printf '[%s] %-6s %s\n' "$(date '+%F %T')" "$level" "$*" >>"$LOG_FILE" || true; }
 info(){ log INFO 96 "$*"; }; ok(){ log OK 92 "$*"; }; warn(){ log WARN '38;5;208' "$*"; }; error(){ log ERROR '1;91' "$*"; }; skip(){ log SKIP 94 "$*"; }; change(){ log CHANGE 95 "$*"; }
 section(){ local title=$1 rule yellow reset; printf -v rule '%*s' "${#title}" ''; yellow=$(colour '1;33'); reset=$(colour 0); printf '\n%b%s\n%s%b\n\n' "$yellow" "$title" "${rule// /-}" "$reset"; }

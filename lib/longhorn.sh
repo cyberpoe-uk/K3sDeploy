@@ -1,9 +1,49 @@
 #!/usr/bin/env bash
 ensure_iscsi(){ local package; if ! command -v iscsiadm >/dev/null; then package=$(package_for iscsi) || die "K3sDeploy does not know the open-iscsi package name for $OS_NAME. Install iscsiadm manually, then retry."; package_refresh; package_install "$package"; fi; as_root systemctl enable --now iscsid; if ! command -v iscsiadm >/dev/null || ! systemctl is-active --quiet iscsid; then die "Longhorn prerequisite iscsid is unavailable"; fi; }
 set_longhorn_setting(){ kubectl_local -n longhorn-system patch settings.longhorn.io "$1" --type merge -p "{\"value\":\"$2\"}"; }
-install_longhorn(){ ensure_iscsi; kubectl_local apply -f "https://raw.githubusercontent.com/longhorn/longhorn/$LONGHORN_VERSION/deploy/longhorn.yaml"; kubectl_local -n longhorn-system rollout status deploy/longhorn-driver-deployer --timeout=600s; kubectl_local -n longhorn-system rollout status deploy/longhorn-ui --timeout=600s; set_longhorn_setting default-data-path "$LONGHORN_PATH"; set_longhorn_setting storage-minimal-available-percentage "$LONGHORN_MIN_AVAILABLE_PERCENT"; set_longhorn_setting storage-over-provisioning-percentage "$LONGHORN_OVERPROVISIONING_PERCENT"; set_longhorn_setting storage-reserved-percentage-for-default-disk "$LONGHORN_ROOT_RESERVED_PERCENT"; set_longhorn_setting default-replica-count "$LONGHORN_REPLICAS"; set_longhorn_setting default-data-locality best-effort; set_longhorn_setting replica-auto-balance least-effort; local sc; sc=$(sed -e "s#__PATH__#$LONGHORN_PATH#g" -e "s/__REPLICAS__/$LONGHORN_REPLICAS/g" "$PROJECT_ROOT/templates/longhorn/storageclass.yaml"); printf '%s' "$sc" | kubectl_local apply -f -; }
+
+replica_counts_ready(){
+  local desired=$1 available=$2
+  [[ $desired =~ ^[1-9][0-9]*$ && $available =~ ^[0-9]+$ ]] && ((available >= desired))
+}
+
+longhorn_deployment_counts(){
+  kubectl_local -n longhorn-system get deployment "$1" \
+    -o jsonpath='{.spec.replicas}{"|"}{.status.availableReplicas}' 2>/dev/null
+}
+
+longhorn_daemonset_counts(){
+  kubectl_local -n longhorn-system get daemonset "$1" \
+    -o jsonpath='{.status.desiredNumberScheduled}{"|"}{.status.numberReady}' 2>/dev/null
+}
+
+longhorn_counts_ready(){
+  local counts=$1 desired available
+  IFS='|' read -r desired available <<<"$counts"
+  replica_counts_ready "$desired" "${available:-0}"
+}
+
+longhorn_installation_ready(){
+  local driver ui manager
+  kubectl_local get namespace longhorn-system >/dev/null 2>&1 || return 1
+  driver=$(longhorn_deployment_counts longhorn-driver-deployer) || return 1
+  ui=$(longhorn_deployment_counts longhorn-ui) || return 1
+  manager=$(longhorn_daemonset_counts longhorn-manager) || return 1
+  longhorn_counts_ready "$driver" && longhorn_counts_ready "$ui" && longhorn_counts_ready "$manager"
+}
+
+longhorn_readiness_summary(){
+  local driver ui manager
+  driver=$(longhorn_deployment_counts longhorn-driver-deployer 2>/dev/null || printf 'missing')
+  ui=$(longhorn_deployment_counts longhorn-ui 2>/dev/null || printf 'missing')
+  manager=$(longhorn_daemonset_counts longhorn-manager 2>/dev/null || printf 'missing')
+  printf 'driver %s, UI %s, managers %s (desired|ready)' "$driver" "$ui" "$manager"
+}
+
+install_longhorn(){ ensure_iscsi; kubectl_local apply -f "https://raw.githubusercontent.com/longhorn/longhorn/$LONGHORN_VERSION/deploy/longhorn.yaml"; kubectl_local -n longhorn-system rollout status deploy/longhorn-driver-deployer --timeout=600s; kubectl_local -n longhorn-system rollout status deploy/longhorn-ui --timeout=600s; kubectl_local -n longhorn-system rollout status daemonset/longhorn-manager --timeout=600s; set_longhorn_setting default-data-path "$LONGHORN_PATH"; set_longhorn_setting storage-minimal-available-percentage "$LONGHORN_MIN_AVAILABLE_PERCENT"; set_longhorn_setting storage-over-provisioning-percentage "$LONGHORN_OVERPROVISIONING_PERCENT"; set_longhorn_setting storage-reserved-percentage-for-default-disk "$LONGHORN_ROOT_RESERVED_PERCENT"; set_longhorn_setting default-replica-count "$LONGHORN_REPLICAS"; set_longhorn_setting default-data-locality best-effort; set_longhorn_setting replica-auto-balance least-effort; local sc; sc=$(sed -e "s#__PATH__#$LONGHORN_PATH#g" -e "s/__REPLICAS__/$LONGHORN_REPLICAS/g" "$PROJECT_ROOT/templates/longhorn/storageclass.yaml"); printf '%s' "$sc" | kubectl_local apply -f -; }
 validate_longhorn(){
   if ! kubectl_local get ns longhorn-system >/dev/null 2>&1; then report Longhorn FAIL 'namespace not found'; return 1; fi
+  if ! longhorn_installation_ready; then report Longhorn FAIL "workloads are not ready: $(longhorn_readiness_summary)"; return 1; fi
   local node=${DESIRED_HOSTNAME:-$(short_hostname)}
   if kubectl_local -n longhorn-system get nodes.longhorn.io "$node" >/dev/null 2>&1; then
     report Longhorn OK 'local node registered'

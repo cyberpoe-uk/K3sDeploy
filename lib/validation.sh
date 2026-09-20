@@ -181,11 +181,9 @@ repair_managed_addons(){
     fi
   fi
 
-  if [[ ${STORAGE_PROVIDER:-longhorn} == longhorn ]] && {
-    [[ $(kubectl_local -n longhorn-system get deploy longhorn-driver-deployer -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true) != 1 ]] ||
-    [[ $(kubectl_local -n longhorn-system get deploy longhorn-ui -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true) != 1 ]]
-  }; then
+  if [[ ${STORAGE_PROVIDER:-longhorn} == longhorn ]] && ! longhorn_installation_ready; then
     warn 'The saved plan selects Longhorn, but its installation is missing or incomplete.'
+    info "Current Longhorn readiness: $(longhorn_readiness_summary)"
     if confirm_yes 'Continue the pinned Longhorn installation now?'; then
       LONGHORN_REPLICAS=${LONGHORN_REPLICAS:-$LONGHORN_DEFAULT_REPLICAS}
       install_longhorn

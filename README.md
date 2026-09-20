@@ -167,7 +167,7 @@ cd K3sDeploy-0.1.0
 
 K3sDeploy starts with its yellow identity banner and asks for an installation profile before displaying the node-action menu:
 
-When stdin and stdout are attached to an interactive terminal, menus use an arrow-key selector. Move with Up/Down or `j`/`k`, then confirm with Enter or Space. Number keys also move directly to the matching item. Redirected input, basic terminals, and automated runs receive ordinary numbered prompts instead; use `--plain-menu` to request those prompts explicitly for screen readers or terminal compatibility. Titles and progress panels use the K3sDeploy yellow identity colour; informational, successful, warning, and error messages use distinct terminal colours. Set the conventional `NO_COLOR=1` environment variable or use `--no-color` to disable colour without disabling interactive menus.
+When stdin and stdout are attached to an interactive terminal, menus use an arrow-key selector. Move with Up/Down or `j`/`k`, then confirm with Enter or Space. Number keys also move directly to the matching item. Redirected input, basic terminals, and automated runs receive ordinary numbered prompts instead; use `--plain-menu` to request those prompts explicitly for screen readers or terminal compatibility. Titles and progress panels use the K3sDeploy yellow identity colour; informational, successful, warning, and error messages use distinct terminal colours. Set the conventional `NO_COLOR=1` environment variable or use `--no-color` to disable colour without disabling interactive menus. If your shell already exports `NO_COLOR`, K3sDeploy explains why its output is plain; use `--color` to override that variable for one run.
 
 - **Recommended installation:** the guided path used throughout this README. K3sDeploy configures kube-vip, MetalLB, and Longhorn.
 - **Advanced/custom installation:** MetalLB remains the recommended load balancer, but K3s ServiceLB or an externally managed system can be selected. Storage choices are Longhorn, guided shared NFS, explicitly accepted non-HA local-path, or another externally managed system.
@@ -180,6 +180,7 @@ Available flags:
 --dry-run   Display intended host changes where practical
 --verbose   Display commands that do not contain secrets
 --yes       Accept ordinary confirmations; exact destructive confirmations remain required
+--color     Force terminal colours even when NO_COLOR is set
 --no-color  Disable terminal colours without disabling arrow-key menus
 --plain-menu Use numbered prompts instead of the interactive arrow-key selector
 --help      Show command help

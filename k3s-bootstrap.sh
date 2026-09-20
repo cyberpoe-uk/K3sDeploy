@@ -32,17 +32,18 @@ trap cleanup_join_check EXIT
 
 usage(){ cat <<EOF
 K3sDeploy Installer $VERSION
-Usage: ./k3s-bootstrap.sh [--dry-run] [--verbose] [--yes] [--no-color] [--plain-menu] [--help] [--version]
+Usage: ./k3s-bootstrap.sh [--dry-run] [--verbose] [--yes] [--color|--no-color] [--plain-menu] [--help] [--version]
 
 Interactive modes: create first manager, join manager, join worker, promote worker, validate, safe repair.
 --dry-run  Show intended host changes (cluster queries may still be read-only)
 --verbose  Show commands as they run (secret-bearing commands remain redacted)
 --yes      Accept ordinary confirmations; never bypasses exact disk confirmation
+--color    Force terminal colours even when the NO_COLOR variable is set
 --no-color Disable terminal colours; interactive arrow-key menus remain enabled
 --plain-menu Use numbered prompts instead of the interactive arrow-key selector
 EOF
 }
-parse_args(){ while (($#)); do case $1 in --dry-run) DRY_RUN=true;; --verbose) VERBOSE=true;; --yes) ASSUME_YES=true;; --no-color) NO_COLOR=1; export NO_COLOR;; --plain-menu) K3SDEPLOY_PLAIN_MENU=1; export K3SDEPLOY_PLAIN_MENU;; --help|-h) usage; exit;; --version) echo "$VERSION"; exit;; *) die "Unknown option: $1";; esac; shift; done; }
+parse_args(){ while (($#)); do case $1 in --dry-run) DRY_RUN=true;; --verbose) VERBOSE=true;; --yes) ASSUME_YES=true;; --color) K3SDEPLOY_FORCE_COLOR=true; export K3SDEPLOY_FORCE_COLOR;; --no-color) NO_COLOR=1; K3SDEPLOY_FORCE_COLOR=false; export NO_COLOR K3SDEPLOY_FORCE_COLOR;; --plain-menu) K3SDEPLOY_PLAIN_MENU=1; export K3SDEPLOY_PLAIN_MENU;; --help|-h) usage; exit;; --version) echo "$VERSION"; exit;; *) die "Unknown option: $1";; esac; shift; done; }
 use_metallb(){ [[ $LOAD_BALANCER_MODE == metallb ]]; }
 use_servicelb(){ [[ $LOAD_BALANCER_MODE == servicelb ]]; }
 use_longhorn(){ [[ $STORAGE_PROVIDER == longhorn ]]; }
@@ -605,6 +606,7 @@ run_menu_action(){
 main(){
   local action
   parse_args "$@"
+  explain_colour_mode
   show_banner
   choose_install_profile || return 0
   while true; do
