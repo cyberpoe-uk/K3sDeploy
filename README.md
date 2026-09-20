@@ -58,7 +58,7 @@ cd K3sDeploy
 For a production deployment, use the same reviewed release tag on every node:
 
 ```bash
-git clone --branch v0.3.8 --depth 1 https://github.com/cyberpoe-uk/K3sDeploy.git
+git clone --branch v1.0.0 --depth 1 https://github.com/cyberpoe-uk/K3sDeploy.git
 cd K3sDeploy
 ./k3s-bootstrap.sh
 ```
@@ -177,10 +177,12 @@ make local-path data unavailable.
 
 ## Backups and disaster recovery
 
-K3sDeploy can retain bounded embedded-etcd snapshots on every manager. These
-snapshots protect Kubernetes objects such as Deployments, Services, ConfigMaps,
-Secrets, Helm state, and PVC definitions. They do not contain the files or
-database contents stored inside persistent volumes.
+K3s creates and retains its native scheduled embedded-etcd snapshots on every
+manager. K3sDeploy leaves that schedule under K3s control and adds compressed,
+bounded snapshots after important milestones such as a successful manager join
+or quorum recovery. These snapshots protect Kubernetes objects such as
+Deployments, Services, ConfigMaps, Secrets, Helm state, and PVC definitions.
+They do not contain files or database contents stored inside persistent volumes.
 
 Option 7 is for a surviving manager that has lost embedded-etcd quorum. It uses
 the manager's current datastore and resets membership only after strong checks,

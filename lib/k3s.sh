@@ -8,14 +8,7 @@ render_k3s_config(){
     disable_components=disable:
     for component in "${disabled[@]}"; do disable_components+=$'\n  - '"$component"; done
   fi
-  if [[ $mode != agent && ${ETCD_SNAPSHOT_POLICY:-managed} != external ]]; then
-    snapshot_settings=$(cat <<EOF
-etcd-snapshot-compress: ${ETCD_SNAPSHOT_COMPRESS:-true}
-etcd-snapshot-retention: ${ETCD_SNAPSHOT_RETENTION:-5}
-etcd-snapshot-schedule-cron: "${ETCD_SNAPSHOT_SCHEDULE_CRON:-0 */12 * * *}"
-EOF
-)
-  elif [[ $mode != agent ]]; then
+  if [[ $mode != agent && ${ETCD_SNAPSHOT_POLICY:-managed} == external ]]; then
     snapshot_settings='etcd-disable-snapshots: true'
   fi
   if [[ $mode == first ]]; then cat <<EOF

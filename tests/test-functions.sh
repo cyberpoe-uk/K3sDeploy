@@ -65,9 +65,8 @@ assert_ok grep -q '^server: https://10.10.20.10:6443$' <<<"$rendered"
 assert_ok grep -q '^token: "secret-test-token"$' <<<"$rendered"
 assert_ok grep -q '^  - servicelb$' <<<"$rendered"
 assert_ok grep -q '^  - local-storage$' <<<"$rendered"
-assert_ok grep -q '^etcd-snapshot-compress: true$' <<<"$rendered"
-assert_ok grep -q '^etcd-snapshot-retention: 5$' <<<"$rendered"
-assert_ok grep -q '^etcd-snapshot-schedule-cron: "0 \*/12 \* \* \*"$' <<<"$rendered"
+assert_bad grep -Eq '^etcd-snapshot-(compress|retention|schedule-cron):' <<<"$rendered"
+assert_bad grep -q '^etcd-disable-snapshots:' <<<"$rendered"
 ETCD_SNAPSHOT_POLICY=external
 external_snapshot_rendered=$(render_k3s_config join 'secret-test-token')
 assert_ok grep -q '^etcd-disable-snapshots: true$' <<<"$external_snapshot_rendered"
@@ -101,7 +100,7 @@ assert_eq "$(parse_k3s_yaml_scalar data-dir <<<"$snapshot_config_sample")" /srv/
 assert_eq "$(parse_k3s_yaml_scalar etcd-snapshot-dir <<<"$snapshot_config_sample")" /srv/k3s-snapshots
 snapshot_save_command=$(
   as_root(){ printf '%s\n' "$*"; }
-  ETCD_SNAPSHOT_COMPRESS=true run_etcd_snapshot_save /srv/k3s-data /srv/k3s-snapshots k3sdeploy-manager-joined
+  ETCD_MILESTONE_COMPRESS=true run_etcd_snapshot_save /srv/k3s-data /srv/k3s-snapshots k3sdeploy-manager-joined
 )
 assert_ok grep -Fq -- 'k3s etcd-snapshot save --config /dev/null --data-dir /srv/k3s-data --dir /srv/k3s-snapshots --name k3sdeploy-manager-joined --snapshot-compress' <<<"$snapshot_save_command"
 assert_bad grep -Eq -- 'k3sdeploy-manager-joined-[0-9]{4}-[0-9]{2}-[0-9]{2}' <<<"$snapshot_save_command"

@@ -141,7 +141,7 @@ POOL_START=10.10.10.110
 POOL_END=10.10.10.115
 plan_output=$(summary 'Create test cluster' "$POOL_START-$POOL_END")
 assert_ok grep -q '^  MetalLB address pool: 10.10.10.110-10.10.10.115$' <<<"$plan_output"
-assert_ok grep -q '^  Etcd backups:     managed locally, 5 scheduled and 1 per milestone type$' <<<"$plan_output"
+assert_ok grep -q '^  Etcd backups:     K3s native schedule, 1 K3sDeploy snapshot per milestone type$' <<<"$plan_output"
 assert_eq "$(grep -c '10.10.10.110' <<<"$plan_output")" 1
 
 kubectl_local(){

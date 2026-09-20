@@ -9,8 +9,8 @@ managed_etcd_snapshots(){ [[ ${ETCD_SNAPSHOT_POLICY:-managed} != external ]]; }
 
 snapshot_policy_description(){
   if managed_etcd_snapshots; then
-    printf 'managed locally, %s scheduled and %s per milestone type\n' \
-      "${ETCD_SNAPSHOT_RETENTION:-5}" "${ETCD_MILESTONE_RETENTION:-1}"
+    printf 'K3s native schedule, %s K3sDeploy snapshot per milestone type\n' \
+      "${ETCD_MILESTONE_RETENTION:-1}"
   else
     printf 'external backup ownership, K3s snapshots disabled\n'
   fi
@@ -21,7 +21,8 @@ collect_etcd_snapshot_policy(){
   section 'Embedded-etcd backup policy'
   printf '%s\n' \
     '  Every manager stores its own embedded-etcd database.' \
-    '  With managed snapshots, each manager keeps a bounded local snapshot set.' \
+    '  K3s creates and retains its native scheduled snapshots automatically.' \
+    '  K3sDeploy adds a bounded snapshot after important installer milestones.' \
     '  One surviving manager can restore the control plane when its snapshot and' \
     '  matching server token survive. A worker alone cannot restore embedded etcd.' \
     '  Local snapshots do not survive loss of every manager or manager disk.' \
@@ -35,7 +36,7 @@ collect_etcd_snapshot_policy(){
   fi
   printf '\n'
   menu_select choice 'Choose who manages embedded-etcd backups' 1 \
-    "Managed local snapshots [Recommended - keep ${ETCD_SNAPSHOT_RETENTION:-5} scheduled and ${ETCD_MILESTONE_RETENTION:-1} per milestone type]" \
+    "K3s schedule plus milestones [Recommended - K3s defaults and ${ETCD_MILESTONE_RETENTION:-1} per milestone type]" \
     'External backup ownership [Advanced - disable K3s snapshots]'
   if ((choice == 1)); then
     ETCD_SNAPSHOT_POLICY=managed
@@ -119,7 +120,7 @@ run_etcd_snapshot_save(){
     --dir "$directory"
     --name "$name"
   )
-  [[ ${ETCD_SNAPSHOT_COMPRESS:-true} == true ]] && args+=(--snapshot-compress)
+  [[ ${ETCD_MILESTONE_COMPRESS:-true} == true ]] && args+=(--snapshot-compress)
   as_root "${args[@]}"
 }
 
