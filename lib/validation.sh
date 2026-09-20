@@ -86,10 +86,17 @@ validate_cluster(){
     validation_summary || true
     return 0
   fi
-  if systemctl is-active --quiet k3s || systemctl is-active --quiet k3s-agent; then
-    report 'K3s service' OK
-  elif systemd_unit_exists k3s || systemd_unit_exists k3s-agent; then
-    report 'K3s service' FAIL 'installed service is inactive'
+  local installed_service= service_state=
+  if systemd_unit_exists k3s; then installed_service=k3s
+  elif systemd_unit_exists k3s-agent; then installed_service=k3s-agent
+  fi
+  if [[ -n $installed_service ]]; then
+    service_state=$(systemctl is-active "$installed_service" 2>/dev/null || true)
+    if [[ $service_state == active ]]; then
+      report 'K3s service' OK "$installed_service is active"
+    else
+      report 'K3s service' FAIL "$installed_service is ${service_state:-unknown}"
+    fi
   else
     report 'K3s service' FAIL 'partial installation: service unit is missing'
   fi
@@ -268,10 +275,10 @@ safe_repair(){
     return 0
   fi
   if command -v lost_etcd_quorum_detected >/dev/null 2>&1 && lost_etcd_quorum_detected; then
-    error 'This manager appears to have lost embedded-etcd quorum. Ordinary safe repair cannot change datastore membership.'
-    info 'Return to the menu and choose option 7 for guarded quorum disaster recovery.'
-    info 'Option 7 will recheck the evidence, explain the impact, create a protected backup, and require exact confirmation.'
     validate_cluster
+    if offer_etcd_quorum_recovery true; then
+      return "$ETCD_RECOVERY_TRANSITION_RC"
+    fi
     return 0
   fi
   local service=

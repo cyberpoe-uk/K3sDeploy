@@ -6,6 +6,7 @@ ETCD_RECOVERY_REMOVED_NODES=
 ETCD_RECOVERY_CORE_SUCCEEDED=false
 ETCD_RECOVERY_RESUME_ONLY=false
 ETCD_RECOVERY_SERVICE_STOPPED=false
+readonly ETCD_RECOVERY_TRANSITION_RC=77
 
 etcd_quorum_log_evidence(){
   grep -Eiq \
@@ -23,9 +24,26 @@ lost_etcd_quorum_detected(){
   as_root_capture test -d /var/lib/rancher/k3s/server/db/etcd/member || return 1
   as_root_capture k3s kubectl get --raw=/readyz >/dev/null 2>&1 && return 1
   service_state=$(systemctl is-active k3s 2>/dev/null || true)
-  [[ $service_state == active || $service_state == activating || $service_state == failed ]] || return 1
-  journal=$(as_root_capture journalctl -u k3s --since '-30 minutes' -n 500 --no-pager 2>/dev/null || true)
+  [[ $service_state == active || $service_state == activating || $service_state == failed || $service_state == inactive ]] || return 1
+  journal=$(as_root_capture journalctl -u k3s -b -n 500 --no-pager 2>/dev/null || true)
   etcd_quorum_log_evidence <<<"$journal"
+}
+
+offer_etcd_quorum_recovery(){
+  local already_detected=${1:-false}
+  if [[ $already_detected != true ]] && ! lost_etcd_quorum_detected; then
+    return 1
+  fi
+  section 'Recommended next action'
+  error 'This manager has strong signs of lost embedded-etcd quorum.'
+  warn 'Cluster add-on failures above may be consequences of the unavailable Kubernetes API. They do not prove that those add-ons or their data were deleted.'
+  info 'Ordinary safe repair cannot change etcd membership. Guarded option 7 is the appropriate recovery path.'
+  if confirm_yes 'Continue directly to option 7 now?'; then
+    info 'Starting the separate guarded quorum-recovery workflow. Its checks and exact confirmation still apply.'
+    return 0
+  fi
+  info 'Quorum recovery was not started. Validation made no system or cluster changes.'
+  return 1
 }
 
 render_single_member_recovery_config(){
@@ -76,7 +94,7 @@ etcd_recovery_dropin_join_keys(){
 
 collect_etcd_recovery_evidence(){
   local journal
-  journal=$(as_root_capture journalctl -u k3s --since '-30 minutes' -n 500 --no-pager 2>/dev/null || true)
+  journal=$(as_root_capture journalctl -u k3s -b -n 500 --no-pager 2>/dev/null || true)
   if ! etcd_quorum_log_evidence <<<"$journal"; then
     warn 'The API is unavailable, but recent K3s logs do not prove an embedded-etcd quorum failure.'
     printf '\nRecent etcd-related K3s messages:\n\n'
@@ -116,8 +134,8 @@ check_etcd_recovery_eligibility(){
 
   service_state=$(systemctl is-active k3s 2>/dev/null || true)
   case $service_state in
-    active|activating|failed) ;;
-    *) die "The k3s service state is '$service_state', not an active lost-quorum pattern. Use validation and ordinary repair first.";;
+    active|activating|failed|inactive) ;;
+    *) die "The k3s service state is '$service_state', not a supported lost-quorum pattern. Use validation and ordinary repair first.";;
   esac
   if dropin=$(etcd_recovery_dropin_join_keys); then
     die "A K3s config drop-in contains a server, token, cluster-init, or datastore-endpoint key: $dropin. Automatic recovery cannot safely determine precedence."

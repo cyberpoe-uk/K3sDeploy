@@ -623,7 +623,11 @@ dispatch_action(){
     2) join_cluster;;
     3) join_agent;;
     4) promote_agent;;
-    5) phase 1 1 'Running read-only node and cluster validation'; validate_cluster;;
+    5)
+      phase 1 1 'Running read-only node and cluster validation'
+      validate_cluster
+      if offer_etcd_quorum_recovery; then return "$ETCD_RECOVERY_TRANSITION_RC"; fi
+      ;;
     6) phase 1 1 'Checking and offering only safe repairs'; safe_repair;;
     7) recover_embedded_etcd_quorum;;
   esac
@@ -645,6 +649,10 @@ run_menu_action(){
   rc=$?
   set -e
   trap 'on_error $LINENO' ERR
+  if ((rc == ETCD_RECOVERY_TRANSITION_RC)); then
+    run_menu_action 7
+    return
+  fi
   if ((rc != 0)); then
     if [[ $action == 7 ]]; then
       error "The disaster-recovery workflow stopped (exit $rc). Read the recovery messages above before taking another action."

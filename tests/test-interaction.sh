@@ -201,6 +201,31 @@ else
   ((++pass))
 fi
 
+lost_etcd_quorum_detected(){ return 0; }
+recovery_offer_output_file=$(mktemp -t k3sdeploy-recovery-offer-XXXXXX)
+if offer_etcd_quorum_recovery <<< 'n' >"$recovery_offer_output_file"; then
+  printf 'FAIL declined quorum recovery offer returned success\n'
+  ((++fail))
+else
+  ((++pass))
+fi
+recovery_offer_output=$(<"$recovery_offer_output_file")
+rm -f "$recovery_offer_output_file"
+assert_ok grep -q 'option 7' <<<"$recovery_offer_output"
+assert_ok grep -q 'Validation made no system or cluster changes' <<<"$recovery_offer_output"
+assert_ok offer_etcd_quorum_recovery <<< ''
+
+ACTION_LOG_FILE=$(mktemp -t k3sdeploy-action-transition-XXXXXX)
+dispatch_action(){
+  printf '%s,' "$1" >>"$ACTION_LOG_FILE"
+  [[ $1 == 5 ]] && return "$ETCD_RECOVERY_TRANSITION_RC"
+  return 0
+}
+assert_ok run_menu_action 5
+assert_eq "$(<"$ACTION_LOG_FILE")" '5,7,'
+rm -f "$ACTION_LOG_FILE"
+assert_ok test "$LAST_WORKFLOW_SUCCEEDED" = true
+
 dispatch_action(){ return 23; }
 assert_ok run_menu_action 1
 assert_ok test "$LAST_WORKFLOW_SUCCEEDED" = false

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Make read-only validation and safe repair recognize a lost-quorum signature and offer a default-Yes transition directly into the separate option-7 workflow. Declining keeps validation read only, while accepting still runs every recovery safeguard and exact confirmation.
+- Report the actual systemd service state instead of describing every non-active K3s service as inactive, and explain that unavailable add-ons during quorum loss may be blocked behind the API rather than deleted.
 - Add a separate, guarded embedded-etcd lost-quorum recovery workflow. It requires a local server datastore, an unavailable API, strong recent quorum-failure evidence, a protected pre-reset backup, and exact operator confirmation before resetting the selected manager to one-member etcd. It never runs from safe repair or through `--yes`.
 - Resume rather than repeat a reset when K3s has already written its reset-completion flag, remove stale Kubernetes Node objects only for former managers, preserve Longhorn records for data review, and print mandatory clean-rejoin guidance.
 - Ask for the existing API VIP before showing token-retrieval instructions, avoid repeating a token pasted into a visible address field, and warn that an exposed token should be rotated.
