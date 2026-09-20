@@ -95,8 +95,8 @@ etcd_snapshot_directory(){
 
 snapshot_path_is_local_and_safe(){
   local path=$1 directory=$2 resolved_path resolved_directory
-  resolved_path=$(readlink -f -- "$path" 2>/dev/null || true)
-  resolved_directory=$(readlink -f -- "$directory" 2>/dev/null || true)
+  resolved_path=$(as_root_capture readlink -f -- "$path" 2>/dev/null || true)
+  resolved_directory=$(as_root_capture readlink -f -- "$directory" 2>/dev/null || true)
   [[ -n $resolved_path && -n $resolved_directory ]] || return 1
   [[ $resolved_path == "$resolved_directory"/* && $resolved_path != "$resolved_directory" ]] || return 1
   as_root_capture test -f "$resolved_path" || return 1

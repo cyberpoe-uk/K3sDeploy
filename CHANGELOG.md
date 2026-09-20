@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Discover and validate snapshots through privileged path resolution so the
+  guarded restore menu can read the root-only snapshot directory it protects.
 - Give milestone snapshots a readable UTC date and time in their K3s-managed
   names. Snapshot save and prune commands now use an isolated command
   configuration, preventing server-only settings and the configured retention

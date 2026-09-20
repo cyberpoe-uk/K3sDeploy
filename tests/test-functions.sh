@@ -111,6 +111,20 @@ snapshot_prune_command=$(
 )
 assert_ok grep -Fq -- 'k3s etcd-snapshot prune --config /dev/null --data-dir /srv/k3s-data --dir /srv/k3s-snapshots --name k3sdeploy-manager-joined --snapshot-retention 1' <<<"$snapshot_prune_command"
 assert_bad grep -Fq -- '/etc/rancher/k3s/config.yaml' <<<"$snapshot_prune_command"
+snapshot_safety_uses_privileged_resolution(){
+  (
+    readlink(){ return 1; }
+    as_root_capture(){
+      if [[ $1 == readlink ]]; then
+        printf '%s\n' "${@: -1}"
+      else
+        return 0
+      fi
+    }
+    snapshot_path_is_local_and_safe /protected/snapshots/test.zip /protected/snapshots
+  )
+}
+assert_ok snapshot_safety_uses_privileged_resolution
 VIRTUALIZATION_TYPE=none
 assert_bad virtual_machine_detected
 VIRTUALIZATION_TYPE=kvm
