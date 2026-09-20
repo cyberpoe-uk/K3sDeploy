@@ -19,9 +19,10 @@ filter_etcd_quorum_log_evidence(){
 }
 
 lost_etcd_quorum_detected(){
-  local journal service_state
+  local journal service_state data_dir
   systemd_unit_exists k3s || return 1
-  as_root_capture test -d /var/lib/rancher/k3s/server/db/etcd/member || return 1
+  data_dir=$(k3s_data_directory)
+  as_root_capture test -d "$data_dir/server/db/etcd/member" || return 1
   as_root_capture k3s kubectl get --raw=/readyz >/dev/null 2>&1 && return 1
   service_state=$(systemctl is-active k3s 2>/dev/null || true)
   [[ $service_state == active || $service_state == activating || $service_state == failed || $service_state == inactive ]] || return 1
@@ -60,18 +61,19 @@ etcd_recovery_backup_space_sufficient(){
 }
 
 check_etcd_recovery_backup_space(){
-  local candidate estimated_bytes available_bytes required_bytes
+  local candidate estimated_bytes available_bytes required_bytes data_dir
   local -a paths=()
+  data_dir=$(k3s_data_directory)
   for candidate in \
     /etc/rancher/k3s \
     /etc/k3s-bootstrap \
-    /var/lib/rancher/k3s/server/db \
-    /var/lib/rancher/k3s/server/token; do
+    "$data_dir/server/db" \
+    "$data_dir/server/token"; do
     as_root_capture test -e "$candidate" && paths+=("$candidate")
   done
   ((${#paths[@]} > 0)) || die 'No protected K3s state was found to estimate the recovery backup.'
   estimated_bytes=$(as_root_capture du -sb -- "${paths[@]}" 2>/dev/null | awk '{total += $1} END {print total + 0}')
-  available_bytes=$(df -B1 --output=avail /var/lib/rancher/k3s/server 2>/dev/null | awk 'NR==2 {print $1}')
+  available_bytes=$(as_root_capture df -B1 --output=avail "$data_dir/server" 2>/dev/null | awk 'NR==2 {print $1}')
   [[ $estimated_bytes =~ ^[0-9]+$ && $available_bytes =~ ^[0-9]+$ ]] || die 'Could not verify free space for the protected recovery backup.'
   required_bytes=$((estimated_bytes + 100 * 1024 * 1024))
   etcd_recovery_backup_space_sufficient "$estimated_bytes" "$available_bytes" || die "The recovery backup needs at least $((required_bytes / 1024 / 1024)) MiB free, but only $((available_bytes / 1024 / 1024)) MiB is available."
@@ -107,14 +109,15 @@ collect_etcd_recovery_evidence(){
 }
 
 check_etcd_recovery_eligibility(){
-  local service_state dropin
+  local service_state dropin data_dir
   ETCD_RECOVERY_RESUME_ONLY=false
   command -v k3s >/dev/null 2>&1 || die 'The K3s binary is missing. This recovery is only for an installed manager.'
   systemd_unit_exists k3s || die 'The k3s server service is not installed. Worker nodes cannot use embedded-etcd quorum recovery.'
   if systemd_unit_exists k3s-agent && ! systemd_unit_exists k3s; then
     die 'This is a worker-only node. Workers are not embedded-etcd members.'
   fi
-  as_root_capture test -d /var/lib/rancher/k3s/server/db/etcd/member || die 'No local embedded-etcd member data was found. K3sDeploy will not create or reset a datastore here.'
+  data_dir=$(k3s_data_directory)
+  as_root_capture test -d "$data_dir/server/db/etcd/member" || die 'No local embedded-etcd member data was found. K3sDeploy will not create or reset a datastore here.'
   as_root_capture test -f "$CONFIG_FILE" || die "The K3s server configuration is missing at $CONFIG_FILE. Automatic recovery was refused."
   as_root_capture test -f "$STATE_FILE" || die "K3sDeploy state is missing at $STATE_FILE. Automatic recovery cannot confirm the installer-managed cluster design."
   if as_root_capture grep -Eq '^datastore-endpoint(\+)?:[[:space:]]*' "$CONFIG_FILE"; then
@@ -125,7 +128,7 @@ check_etcd_recovery_eligibility(){
     die 'The Kubernetes API is ready. Lost-quorum disaster recovery is not required and no reset was attempted.'
   fi
 
-  if as_root_capture test -e /var/lib/rancher/k3s/server/db/reset-flag; then
+  if as_root_capture test -e "$data_dir/server/db/reset-flag"; then
     ETCD_RECOVERY_RESUME_ONLY=true
     warn 'K3s has a cluster-reset completion flag. The datastore must not be reset a second time.'
     info 'K3sDeploy will only start the normal k3s service and verify the completed reset.'
@@ -145,7 +148,8 @@ check_etcd_recovery_eligibility(){
 }
 
 show_etcd_recovery_warning(){
-  local node=$1
+  local node=$1 data_dir
+  data_dir=$(k3s_data_directory)
   section 'Embedded-etcd quorum disaster recovery'
   printf '%s\n' \
     '  This is not an ordinary repair. It changes embedded-etcd membership.' \
@@ -153,7 +157,7 @@ show_etcd_recovery_warning(){
     '  All other manager machines must be powered off or permanently isolated.' \
     '  An old manager database must never reconnect after this reset.' \
     '  Other managers must return from a clean pre-join state, or have their local' \
-    '  /var/lib/rancher/k3s/server/db directory cleared before they join again.' \
+    "  $data_dir/server/db directory cleared before they join again." \
     '  Worker nodes are not etcd members and are not reset by this workflow.' \
     '  K3sDeploy will remove stale Kubernetes Node objects only for other managers.' \
     '  Longhorn node and replica records are preserved for separate data review.'
@@ -174,19 +178,21 @@ confirm_etcd_recovery_resume(){
 }
 
 backup_etcd_recovery_state(){
-  local stamp directory candidate
+  local prefix=${1:-pre-quorum-reset} stamp directory candidate data_dir relative
   local -a paths=()
   stamp=$(date +%Y%m%d-%H%M%S)
-  directory=/var/lib/rancher/k3s/server/etcd-recovery
-  ETCD_RECOVERY_BACKUP="$directory/pre-quorum-reset-$stamp.tar.gz"
-  ETCD_RECOVERY_CONFIG_BACKUP="$directory/config.yaml.before-reset-$stamp"
+  data_dir=$(k3s_data_directory)
+  directory="$data_dir/server/etcd-recovery"
+  ETCD_RECOVERY_BACKUP="$directory/$prefix-$stamp.tar.gz"
+  ETCD_RECOVERY_CONFIG_BACKUP="$directory/config.yaml.before-${prefix#pre-}-$stamp"
   as_root install -d -o root -g root -m 700 "$directory"
   for candidate in \
     etc/rancher/k3s \
     etc/k3s-bootstrap \
-    var/lib/rancher/k3s/server/db \
-    var/lib/rancher/k3s/server/token; do
-    as_root_capture test -e "/$candidate" && paths+=("$candidate")
+    "${data_dir#/}/server/db" \
+    "${data_dir#/}/server/token"; do
+    relative=${candidate#/}
+    as_root_capture test -e "/$relative" && paths+=("$relative")
   done
   ((${#paths[@]} > 0)) || die 'No protected K3s state was available to back up. The reset was not attempted.'
   as_root tar -C / -czf "$ETCD_RECOVERY_BACKUP" "${paths[@]}"
@@ -216,10 +222,11 @@ restore_pre_recovery_config(){
 }
 
 etcd_recovery_exit_cleanup(){
-  local rc=$?
+  local rc=$? data_dir
+  data_dir=$(k3s_data_directory)
   if $ETCD_RECOVERY_SERVICE_STOPPED; then
     warn 'The recovery workflow stopped while the k3s service was down.'
-    if as_root_capture test -e /var/lib/rancher/k3s/server/db/reset-flag; then
+    if as_root_capture test -e "$data_dir/server/db/reset-flag"; then
       warn 'K3s recorded reset completion. The original join configuration will not be restored and the reset will not be repeated.'
     else
       restore_pre_recovery_config
@@ -232,13 +239,14 @@ etcd_recovery_exit_cleanup(){
 }
 
 run_single_member_etcd_reset(){
-  local rc=0
+  local rc=0 data_dir
+  data_dir=$(k3s_data_directory)
   if as_root timeout 600 k3s server --cluster-reset; then
     return 0
   else
     rc=$?
   fi
-  if as_root_capture test -e /var/lib/rancher/k3s/server/db/reset-flag; then
+  if as_root_capture test -e "$data_dir/server/db/reset-flag"; then
     warn "The reset command exited with status $rc, but K3s recorded reset completion. K3sDeploy will not run it again."
     return 0
   fi
@@ -351,6 +359,7 @@ recover_embedded_etcd_quorum(){
   if ((${VALIDATION_FAILURES:-0} > 0)); then
     warn 'Core etcd quorum recovery completed, but the health report still has failures that require review.'
   else
+    create_milestone_etcd_snapshot post-quorum-recovery
     ok 'The surviving manager has a working single-member embedded-etcd control plane'
   fi
 }

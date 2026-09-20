@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 render_k3s_config(){
-  local mode=$1 token=${2:-} component disable_components=
+  local mode=$1 token=${2:-} component disable_components= snapshot_settings=
   local -a disabled=()
   [[ ${LOAD_BALANCER_MODE:-metallb} == servicelb ]] || disabled+=(servicelb)
   [[ ${STORAGE_PROVIDER:-longhorn} == local-path ]] || disabled+=(local-storage)
@@ -8,12 +8,21 @@ render_k3s_config(){
     disable_components=disable:
     for component in "${disabled[@]}"; do disable_components+=$'\n  - '"$component"; done
   fi
+  if [[ $mode != agent ]]; then
+    snapshot_settings=$(cat <<EOF
+etcd-snapshot-compress: ${ETCD_SNAPSHOT_COMPRESS:-true}
+etcd-snapshot-retention: ${ETCD_SNAPSHOT_RETENTION:-5}
+etcd-snapshot-schedule-cron: "${ETCD_SNAPSHOT_SCHEDULE_CRON:-0 */12 * * *}"
+EOF
+)
+  fi
   if [[ $mode == first ]]; then cat <<EOF
 cluster-init: true
 node-ip: $NODE_IP
 advertise-address: $NODE_IP
 tls-san:
   - $API_VIP
+$snapshot_settings
 $disable_components
 EOF
 elif [[ $mode == join ]]; then cat <<EOF
@@ -23,6 +32,7 @@ node-ip: $NODE_IP
 advertise-address: $NODE_IP
 tls-san:
   - $API_VIP
+$snapshot_settings
 $disable_components
 EOF
 else cat <<EOF

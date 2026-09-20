@@ -2,7 +2,7 @@
 
 K3sDeploy is an interactive Linux installer for building and maintaining a small highly available K3s cluster. It guides the operator through networking, node roles, API high availability, application load balancers, ingress, and persistent storage without requiring prior Kubernetes installation experience.
 
-The project favors visible checks and explicit confirmation over unattended destructive changes. It does not reset clusters, erase unidentified disks, retrieve tokens from remote machines, or silently replace existing cluster configuration.
+The project favors visible checks and explicit confirmation over unattended destructive changes. Cluster membership reset and snapshot restore exist only in clearly labelled disaster-recovery workflows with protected backups and exact confirmation. K3sDeploy does not erase unidentified disks, retrieve tokens from remote machines, or silently replace existing cluster configuration.
 
 ## What it installs
 
@@ -199,7 +199,8 @@ The menu provides:
 5. Validate this node and cluster
 6. Repair safe local differences
 7. Recover lost embedded-etcd quorum (disaster recovery)
-8. Exit
+8. Restore an embedded-etcd snapshot (disaster recovery)
+9. Exit
 ```
 
 If K3s is already present, the installer displays a warning before the menu. Fresh-create and fresh-join operations are then blocked before asking for a token or making storage changes. This protects operators who accidentally run the installer on an existing node.
@@ -217,12 +218,13 @@ Run option 1 on the first manager. The installer:
 5. Installs the pinned K3s version and waits for authenticated API, Ready, control-plane, and etcd checks.
 6. Installs kube-vip and any supported load-balancer and storage components selected in the profile.
 7. Runs a final health report.
+8. After health checks pass, creates an official K3s on-demand etcd snapshot on the manager.
 
 Run option 2 on manager two and manager three, one at a time. K3sDeploy asks for the existing API VIP first. After confirming that the API is reachable, it explains how to retrieve the full secure server token with `sudo cat /var/lib/rancher/k3s/server/token` on a healthy manager and opens a hidden token field. Before collecting hostname or storage choices, K3sDeploy verifies the cluster CA and authenticates against the existing manager. The token is never echoed or written to the general installer state file.
 
 Treat the server token as a cluster-administrator secret. If it is accidentally pasted into a visible prompt, terminal recording, issue, or chat, rotate it before relying on the cluster in production. Follow the [official K3s server-token rotation procedure](https://docs.k3s.io/cli/token#k3s-token-rotate), update and restart every server or agent that originally joined with the old token, and retain the old token with any older datastore snapshot that still requires it.
 
-After K3s reports the new node Ready, K3sDeploy waits for the existing kube-vip, MetalLB, and selected storage workloads to expand onto that node. Final validation starts only after those managed add-ons are ready, preventing normal startup time from being reported as a failure.
+After K3s reports the new node Ready, K3sDeploy waits for the existing kube-vip, MetalLB, and selected storage workloads to expand onto that node. Final validation starts only after those managed add-ons are ready, preventing normal startup time from being reported as a failure. A successful manager join or worker-to-manager promotion also creates an official local milestone snapshot on that new manager.
 
 Run option 3 on remaining workers. Cluster-wide components are not reinstalled. The installer prepares local prerequisites and waits until the worker is registered and Ready.
 
@@ -251,6 +253,8 @@ The 30% reservation is a Longhorn scheduling rule, not a filesystem quota. The o
 This is a recommended choice when a separate physical or virtual disk is not available. It gives Longhorn a separate filesystem and protects root capacity without resizing existing filesystems. It still shares the OS disk, so it does not protect a Longhorn replica from failure of that physical or virtual disk. The installer understands both ordinary partition layouts and common Linux LVM layouts.
 
 Seeing a smaller root filesystem and a larger OS disk is not an error. For example, a Linux installer may place a 59 GiB root logical volume on a 120 GiB physical or virtual disk while the rest remains free inside the LVM volume group. That space is not visible to `parted` as unallocated disk space, so K3sDeploy checks both layers separately.
+
+The same rule applies after a virtual disk is expanded. A VM can report a 220 GiB `/dev/sda` while `/` remains a 59 GiB logical volume. Shared-root storage is still unavailable because its guardrails apply to the mounted root filesystem, not the capacity of the disk beneath it. Choose separate OS-disk storage so K3sDeploy can inspect free LVM extents and unallocated space. The installer never grows the root filesystem automatically.
 
 If `lsblk` already reports the intended virtual-disk size, the guest can see that capacity. Hypervisor thin or thick provisioning does not explain a smaller root logical volume. The unused capacity may simply be free inside LVM. Check it with `sudo vgs` and `sudo lvs`. In that layout, option 2 creates separate Longhorn storage from the free extents without expanding or shrinking root.
 
@@ -374,6 +378,27 @@ After recovery, review Longhorn volume health, replica placement, and stale Long
 
 This workflow resets membership from the surviving manager's current data. It does not restore an etcd snapshot, recover application data that is already absent, or reconcile a rolled-back Longhorn disk. Virtual-machine snapshots taken at different times are not a coordinated cluster backup. Maintain K3s etcd snapshots and application backups outside the cluster. See the [official K3s snapshot and restore documentation](https://docs.k3s.io/cli/etcd-snapshot) and [embedded-etcd HA guidance](https://docs.k3s.io/datastore/ha-embedded).
 
+## Embedded-etcd snapshots and restore
+
+Every manager installed by K3sDeploy explicitly enables K3s's native compressed embedded-etcd snapshots. Each manager saves its own local snapshot every 12 hours and retains the five newest scheduled snapshots. This gives more than one manager a local recovery point, but copies on cluster nodes still share the cluster's failure domains.
+
+K3sDeploy also creates an on-demand milestone snapshot after a successful first-manager installation, manager join, worker promotion, quorum recovery, or snapshot restore. First-manager snapshots are created after kube-vip, the selected load balancer, and the selected storage controller are installed and health validation has passed. On a healthy manager installed by an older K3sDeploy release, option 6 offers a one-time baseline when it cannot find an existing K3sDeploy milestone. Scheduled snapshots then capture later Kubernetes changes, including deployed application objects. On-demand snapshots are not removed by K3s's scheduled-snapshot retention, so review old milestone and pre-restore snapshots during planned maintenance.
+
+The normal local snapshot directory is `/var/lib/rancher/k3s/server/db/snapshots`. K3sDeploy reads `data-dir` or `etcd-snapshot-dir` from the managed K3s configuration when either value changes that location. Use `sudo k3s etcd-snapshot list` to inspect snapshots. Copy important snapshots and `/var/lib/rancher/k3s/server/token` to encrypted off-node storage. A local snapshot is lost if that manager or its disk is lost. K3s also supports S3-compatible snapshot storage, but this release does not collect or store S3 credentials.
+
+Option 8 restores an official local K3s snapshot. It does not accept the raw `pre-quorum-reset-*.tar.gz` safety archives. The workflow:
+
+1. Requires an installed manager with local embedded-etcd data and K3sDeploy state.
+2. Finds the configured local snapshot directory and lists safe regular snapshot files with newest first.
+3. Explains that etcd contains Kubernetes objects and configuration, but not Longhorn, NFS, or application volume contents.
+4. Creates a current-state on-demand snapshot first when the API is healthy.
+5. Requires confirmation that every other manager is stopped or isolated, followed by an exact `RESTORE SNAPSHOT ON HOSTNAME` confirmation. The `--yes` flag cannot bypass the exact confirmation.
+6. Stops K3s and creates a verified root-only archive of the current configuration, token, and server database under `/var/lib/rancher/k3s/server/etcd-recovery/`.
+7. Runs the official local K3s snapshot restore with `--cluster-reset-restore-path`, making the selected manager the sole etcd member.
+8. Starts K3s, removes stale Kubernetes Node objects for other managers, validates the restored cluster, and creates a new post-restore snapshot when health checks pass.
+
+Restoration rolls Kubernetes state back to the selected time. Kubernetes objects created later may disappear, but their external or persistent data is not rolled back in step with etcd. This can leave storage records and actual volume contents at different points in time, so inspect applications and Longhorn carefully before changing or deleting storage. Clean or rebuild every former manager before it rejoins. Never reconnect an old manager using its pre-restore server database.
+
 After any successful menu workflow, K3sDeploy prints an action-specific completion summary, the final health counts, the log location, and exits normally. A workflow that stops safely because of an invalid input or system condition returns to the menu so the operator can correct it without downloading or starting the installer again.
 
 ## Safety and idempotency
@@ -388,7 +413,7 @@ After any successful menu workflow, K3sDeploy prints an action-specific completi
 - Existing partitions, filesystems, and mounted disks are rejected by dedicated-disk mode.
 - Join tokens are read silently and never written to logs or general state.
 - `/etc/k3s-bootstrap/config` stores non-secret installation intent with mode `0600`.
-- Embedded-etcd reset exists only in the guarded option-7 disaster-recovery workflow. There is no general reset or uninstall shortcut.
+- Embedded-etcd membership reset and snapshot restore exist only in the guarded option-7 and option-8 disaster-recovery workflows. There is no general reset or uninstall shortcut.
 
 ## MetalLB and Traefik
 
@@ -400,7 +425,8 @@ K3s manages packaged Traefik. Reserve a specific MetalLB address using a K3s `He
 
 ## Backups and operational security
 
-- Back up etcd snapshots, application data, `/etc/rancher/k3s`, and installer state before maintenance.
+- Copy etcd snapshots and the matching server token to protected off-node storage. Local snapshots alone do not survive loss of the manager or its disk.
+- Back up application data, `/etc/rancher/k3s`, and installer state before maintenance.
 - Store Longhorn backups on independent NFS or object storage. Replicas alone do not protect against deletion, corruption, or cluster loss.
 - Protect the server token as an administrative secret.
 - Coordinate manager maintenance and reboots one node at a time.
@@ -425,7 +451,8 @@ The optional Longhorn test creates an isolated namespace, a temporary `Delete` S
 - Nodes are installed one at a time. This release is not a remote multi-node orchestrator.
 - Join tokens must be entered manually on each joining node.
 - Existing volume replica counts are never changed automatically.
-- The installer does not restore etcd snapshots, Longhorn backups, or application manifests.
+- Snapshot restore currently discovers official local K3s snapshots only. S3-compatible remote restore remains a manual K3s operation.
+- The installer does not restore Longhorn backups, external storage, or application manifests.
 - Guided same-disk partition creation supports GPT only and consumes existing unallocated space. It does not shrink filesystems.
 - Address-conflict and Layer-2 checks reduce common mistakes but cannot prove the surrounding network configuration is correct.
 

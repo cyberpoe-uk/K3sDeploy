@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Configure compressed embedded-etcd snapshots on every managed server with a twice-daily schedule and five-snapshot retention, then create official milestone snapshots after healthy manager installation, join, promotion, quorum recovery, and snapshot restore workflows. Safe repair offers one baseline snapshot when an older healthy manager has no K3sDeploy milestone.
+- Add guarded local embedded-etcd snapshot restore as option 8. It discovers the configured snapshot directory, creates a current-state safety snapshot when possible, preserves stopped server state, requires manager-isolation and exact restore confirmation, resets membership through the official K3s restore path, and validates the result without claiming to restore persistent-volume contents.
+- Explain why increasing an underlying physical or virtual disk does not enlarge the root filesystem or make shared-root Longhorn storage eligible, while directing the operator to the separate LVM and unallocated-space checks.
 - Make read-only validation and safe repair recognize a lost-quorum signature and offer a default-Yes transition directly into the separate option-7 workflow. Declining keeps validation read only, while accepting still runs every recovery safeguard and exact confirmation.
 - Report the actual systemd service state instead of describing every non-active K3s service as inactive, and explain that unavailable add-ons during quorum loss may be blocked behind the API rather than deleted.
 - Add a separate, guarded embedded-etcd lost-quorum recovery workflow. It requires a local server datastore, an unavailable API, strong recent quorum-failure evidence, a protected pre-reset backup, and exact operator confirmation before resetting the selected manager to one-member etcd. It never runs from safe repair or through `--yes`.

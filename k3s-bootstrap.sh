@@ -27,6 +27,8 @@ source "$SCRIPT_DIR/lib/nfs.sh"
 source "$SCRIPT_DIR/lib/updates.sh"
 # shellcheck source=lib/validation.sh
 source "$SCRIPT_DIR/lib/validation.sh"
+# shellcheck source=lib/etcd-snapshot.sh
+source "$SCRIPT_DIR/lib/etcd-snapshot.sh"
 # shellcheck source=lib/etcd-recovery.sh
 source "$SCRIPT_DIR/lib/etcd-recovery.sh"
 trap 'on_error $LINENO' ERR
@@ -36,7 +38,7 @@ usage(){ cat <<EOF
 K3sDeploy Installer $VERSION
 Usage: ./k3s-bootstrap.sh [--dry-run] [--verbose] [--yes] [--color|--no-color] [--plain-menu] [--help] [--version]
 
-Interactive modes: create first manager, join manager, join worker, promote worker, validate, safe repair, lost-quorum recovery.
+Interactive modes: create first manager, join manager, join worker, promote worker, validate, safe repair, quorum recovery, snapshot restore.
 --dry-run  Show intended host changes (cluster queries may still be read-only)
 --verbose  Show commands as they run (secret-bearing commands remain redacted)
 --yes      Accept ordinary confirmations, never bypasses exact destructive confirmation
@@ -407,6 +409,7 @@ new_cluster(){
   phase 8 8 'Running final health validation'
   validate_cluster
   require_healthy_installation
+  create_milestone_etcd_snapshot first-manager-ready
 }
 
 join_cluster(){
@@ -457,6 +460,7 @@ join_cluster(){
   phase 8 8 'Running final health validation'
   validate_cluster
   require_healthy_installation
+  create_milestone_etcd_snapshot manager-joined
   offer_longhorn_smoke
 }
 
@@ -534,7 +538,7 @@ promote_agent(){
   as_root /usr/local/bin/k3s-agent-uninstall.sh
   phase 5 7 'Installing this machine as a manager/server'; local cfg; cfg=$(render_k3s_config join "$JOIN_TOKEN"); install_k3s "$cfg" server; JOIN_TOKEN=; cfg=; NODE_ROLE=server; persist_state
   phase 6 7 'Waiting for Ready, roles and managed add-ons'; wait_k3s; wait_local_node; check_kube_vip_interface || warn 'kube-vip requires operator attention'; prepare_storage_client; wait_for_joined_node_addons true
-  phase 7 7 'Running final health and quorum-oriented validation'; validate_cluster; require_healthy_installation; offer_longhorn_smoke
+  phase 7 7 'Running final health and quorum-oriented validation'; validate_cluster; require_healthy_installation; create_milestone_etcd_snapshot manager-promoted; offer_longhorn_smoke
 }
 configure_updates_prompt(){ if ! security_updates_supported; then skip "Automatic security-update configuration is not changed on $OS_NAME. Use its native update policy."; elif confirm 'Enable security-only unattended upgrades (automatic reboot disabled)?'; then configure_updates; else skip 'Unattended upgrades unchanged'; fi; }
 load_state(){ local state_content; if [[ -r $STATE_FILE ]]; then state_content=$(<"$STATE_FILE"); elif sudo -n test -r "$STATE_FILE" 2>/dev/null; then state_content=$(sudo cat "$STATE_FILE"); else return 0; fi; while IFS='=' read -r key value; do case $key in INSTALL_PROFILE|LOAD_BALANCER_MODE|STORAGE_PROVIDER|NODE_ROLE|NODE_IP|API_VIP|POOL_START|POOL_END|STORAGE_MODE|STORAGE_DEVICE|LONGHORN_PATH|LONGHORN_DEVICE_UUID|LONGHORN_REPLICAS|NFS_SERVER|NFS_EXPORT) printf -v "$key" '%s' "$value";; esac; done <<<"$state_content"; }
@@ -552,6 +556,7 @@ show_main_menu(){
     'Validate this node and cluster - read only' \
     'Repair safe local differences - asks before changes' \
     'Recover lost embedded-etcd quorum - disaster recovery' \
+    'Restore an embedded-etcd snapshot - disaster recovery' \
     'Exit'
 }
 workflow_completion_summary(){
@@ -595,7 +600,17 @@ workflow_completion_summary(){
         "  Removed manager Node objects: ${ETCD_RECOVERY_REMOVED_NODES:-none}." \
         '  Next: clean or rebuild old managers, then join manager two and manager three one at a time.'
       ;;
+    8)
+      printf '%s\n' \
+        '  Result: the selected embedded-etcd snapshot was restored on this manager.' \
+        "  Restored snapshot: ${ETCD_RESTORE_SELECTED:-a previously completed restore was resumed}." \
+        "  Safety backup: ${ETCD_RECOVERY_BACKUP:-an earlier restore was resumed, no new backup was created}." \
+        '  Next: inspect applications and persistent data, then clean and rejoin other managers one at a time.'
+      ;;
   esac
+  if [[ -n ${ETCD_LAST_SNAPSHOT:-} ]]; then
+    printf '  New etcd snapshot: %s\n' "$ETCD_LAST_SNAPSHOT"
+  fi
   printf '  Health: %s failed check(s), %s warning(s), %s untested check(s).\n' \
     "${VALIDATION_FAILURES:-0}" "${VALIDATION_WARNINGS:-0}" "${VALIDATION_NOT_TESTED:-0}"
   printf '  Details: %s\n' "$LOG_FILE"
@@ -614,7 +629,7 @@ dispatch_action(){
     return
   fi
   require_privileges
-  [[ $action =~ ^[4-7]$ ]] && load_state
+  [[ $action =~ ^[4-8]$ ]] && load_state
   if [[ $action =~ ^[1-3]$ ]] && { [[ $K3S_INSTALLED == yes ]] || as_root_capture test -e "$CONFIG_FILE" || systemctl is-active --quiet k3s || systemctl is-active --quiet k3s-agent; }; then
     die 'Existing K3s state detected. Refusing a fresh installation. Choose validation or safe repair instead.'
   fi
@@ -630,6 +645,7 @@ dispatch_action(){
       ;;
     6) phase 1 1 'Checking and offering only safe repairs'; safe_repair;;
     7) recover_embedded_etcd_quorum;;
+    8) restore_embedded_etcd_snapshot;;
   esac
 }
 run_menu_action(){
@@ -653,10 +669,14 @@ run_menu_action(){
     run_menu_action 7
     return
   fi
+  if ((rc == ETCD_RESTORE_CANCEL_RC)); then
+    info 'Snapshot restore was cancelled. Returning to the installer menu.'
+    return
+  fi
   if ((rc != 0)); then
-    if [[ $action == 7 ]]; then
+    if [[ $action == 7 || $action == 8 ]]; then
       error "The disaster-recovery workflow stopped (exit $rc). Read the recovery messages above before taking another action."
-      info 'Do not run a manual cluster reset or repeatedly retry commands. Choosing option 7 again will detect a completed reset and resume instead of repeating it.'
+      info "Do not run a manual cluster reset or repeatedly retry commands. Choosing option $action again will detect a completed reset and resume instead of repeating it."
     else
       warn "This workflow stopped safely (exit $rc). No later phases were run."
       info 'Review the message above, correct the input or system condition, then choose an installer option again.'
@@ -677,8 +697,8 @@ main(){
     basic_host_sanity
     announce_existing_k3s
     show_main_menu action
-    [[ $action == 8 ]] && return 0
-    if [[ ! $action =~ ^[1-7]$ ]]; then warn 'Invalid selection. Choose a number from 1 to 8.'; continue; fi
+    [[ $action == 9 ]] && return 0
+    if [[ ! $action =~ ^[1-8]$ ]]; then warn 'Invalid selection. Choose a number from 1 to 9.'; continue; fi
     run_menu_action "$action"
     $LAST_WORKFLOW_SUCCEEDED && return 0
   done

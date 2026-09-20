@@ -264,6 +264,7 @@ verify_after_repair(){
     warn 'Repair completed, but failed health checks remain. Resolve the reported failure before deploying workloads.'
     return 0
   fi
+  offer_initial_etcd_snapshot
   offer_longhorn_smoke
 }
 safe_repair(){

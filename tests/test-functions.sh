@@ -63,6 +63,9 @@ assert_ok grep -q '^server: https://10.10.20.10:6443$' <<<"$rendered"
 assert_ok grep -q '^token: "secret-test-token"$' <<<"$rendered"
 assert_ok grep -q '^  - servicelb$' <<<"$rendered"
 assert_ok grep -q '^  - local-storage$' <<<"$rendered"
+assert_ok grep -q '^etcd-snapshot-compress: true$' <<<"$rendered"
+assert_ok grep -q '^etcd-snapshot-retention: 5$' <<<"$rendered"
+assert_ok grep -q '^etcd-snapshot-schedule-cron: "0 \*/12 \* \* \*"$' <<<"$rendered"
 LOAD_BALANCER_MODE=servicelb STORAGE_PROVIDER=local-path
 servicelb_rendered=$(render_k3s_config first)
 assert_bad grep -q '^disable:$' <<<"$servicelb_rendered"
@@ -81,6 +84,13 @@ assert_ok grep -q '^server: https://10.10.20.10:6443$' <<<"$agent_rendered"
 assert_ok grep -q '^token: "agent-secret-token"$' <<<"$agent_rendered"
 assert_bad grep -q '^advertise-address:' <<<"$agent_rendered"
 assert_bad grep -q '^disable:' <<<"$agent_rendered"
+assert_bad grep -q '^etcd-snapshot-' <<<"$agent_rendered"
+# shellcheck source=../lib/etcd-snapshot.sh
+source "$ROOT/lib/etcd-snapshot.sh"
+snapshot_config_sample='data-dir: "/srv/k3s-data"
+etcd-snapshot-dir: '\''/srv/k3s-snapshots'\'' # protected snapshots'
+assert_eq "$(parse_k3s_yaml_scalar data-dir <<<"$snapshot_config_sample")" /srv/k3s-data
+assert_eq "$(parse_k3s_yaml_scalar etcd-snapshot-dir <<<"$snapshot_config_sample")" /srv/k3s-snapshots
 # shellcheck source=../lib/etcd-recovery.sh
 source "$ROOT/lib/etcd-recovery.sh"
 quorum_sample='Sep 20 k3s-demo1 k3s[43591]: {"level":"warn","msg":"failed to publish local member to cluster through raft","error":"context deadline exceeded"}'

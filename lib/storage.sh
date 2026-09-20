@@ -552,10 +552,21 @@ apply_storage_plan(){
 
 select_storage(){
   local root_gib available_gib root_fstype root_disk root_disk_gib=unknown root_eligible=true default_choice=1 choice root_choice root_reason
+  local disk_root_difference=0 capacity_note=
   require_storage_inspection_tools
   root_gib=$(root_capacity_gib); available_gib=$(root_available_gib); root_disk=$(root_parent_disk || true)
   root_fstype=$(findmnt -no FSTYPE /)
   [[ -z $root_disk ]] || root_disk_gib=$(block_capacity_gib "$root_disk")
+  if [[ $root_disk_gib =~ ^[0-9]+$ ]] && ((root_disk_gib > root_gib)); then
+    disk_root_difference=$((root_disk_gib-root_gib))
+    printf -v capacity_note '%s\n' \
+      'Capacity note' \
+      "   The OS disk is ${disk_root_difference} GiB larger than the root filesystem." \
+      '   Expanding a physical or virtual disk does not automatically enlarge root.' \
+      '   Root eligibility uses the filesystem size, not the underlying disk size.' \
+      '   Option 2 checks the other layers for free LVM extents and unallocated space.' \
+      ''
+  fi
   if [[ $root_fstype != ext4 && $root_fstype != xfs ]] || ! capacity_meets_minimum "$root_gib" "$LONGHORN_ROOT_MIN_GIB" || ! capacity_meets_minimum "$available_gib" "$LONGHORN_ROOT_MIN_AVAILABLE_GIB"; then
     root_eligible=false
     if [[ -n $root_disk ]]; then default_choice=2; else default_choice=3; fi
@@ -567,6 +578,7 @@ Detected storage
   Root filesystem: ${root_gib} GiB total, ${available_gib} GiB available (${root_fstype})
   OS disk:         ${root_disk:-unknown} (${root_disk_gib} GiB)
 
+${capacity_note}
 Storage guidance
 
 Root filesystem [NOT RECOMMENDED$($root_eligible || printf ' AND UNAVAILABLE')]
