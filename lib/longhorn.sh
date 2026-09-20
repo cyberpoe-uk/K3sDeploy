@@ -13,6 +13,41 @@ validate_longhorn(){
   fi
 }
 
+longhorn_storage_node_count(){
+  local records name ready schedulable scheduling_allowed count=0
+  records=$(kubectl_local -n longhorn-system get nodes.longhorn.io \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"|"}{.status.conditions[?(@.type=="Schedulable")].status}{"|"}{.spec.allowScheduling}{"\n"}{end}' 2>/dev/null) || { printf '0\n'; return; }
+  while IFS='|' read -r name ready schedulable scheduling_allowed; do
+    [[ -n $name && $ready == True && $schedulable == True && $scheduling_allowed == true ]] && count=$((count+1))
+  done <<<"$records"
+  printf '%d\n' "$count"
+}
+
+longhorn_smoke_status(){
+  kubectl_local -n kube-system get configmap k3sdeploy-longhorn-smoke-status \
+    -o jsonpath='{.data.testedAt}{"|"}{.data.testedFromNode}{"|"}{.data.installerVersion}' 2>/dev/null
+}
+
+record_longhorn_smoke_success(){
+  local tested_at node manifest
+  tested_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  node=$(short_hostname)
+  manifest=$(cat <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k3sdeploy-longhorn-smoke-status
+  namespace: kube-system
+data:
+  testedAt: "$tested_at"
+  testedFromNode: "$node"
+  installerVersion: "$VERSION"
+  scope: "single-volume provisioning, attachment, reattachment, and persistence; not an HA failover test"
+EOF
+)
+  printf '%s' "$manifest" | kubectl_local apply -f -
+}
+
 cleanup_longhorn_smoke(){
   local namespace=$1 storage_class=$2
   kubectl_local delete namespace "$namespace" --ignore-not-found --wait=true --timeout=120s >/dev/null 2>&1 || warn "Smoke-test namespace $namespace is still terminating; Kubernetes will continue cleaning it up."
@@ -106,5 +141,6 @@ EOF
     return 1
   fi
   cleanup_longhorn_smoke "$namespace" "$storage_class"
+  record_longhorn_smoke_success || warn 'The storage test passed, but K3sDeploy could not record its completion in the cluster.'
   ok 'Longhorn provisioning, write, reattachment, and persisted-data smoke test passed'
 }

@@ -101,17 +101,32 @@ assert_eq "$POOL_START-$POOL_END" 10.10.10.110-10.10.10.115
 SMOKE_LOG=$(mktemp -t k3sdeploy-smoke-test-XXXXXX)
 kubectl_local(){
   printf 'ARGS %s\n' "$*" >>"$SMOKE_LOG"
-  if [[ $* == 'apply -f -' ]]; then cat >>"$SMOKE_LOG"; fi
+  if [[ $* == *'apply -f -' ]]; then cat >>"$SMOKE_LOG"; fi
   return 0
 }
 assert_ok run_longhorn_smoke
 assert_ok grep -q '^reclaimPolicy: Delete$' "$SMOKE_LOG"
 assert_ok grep -q '^  numberOfReplicas: "1"$' "$SMOKE_LOG"
 assert_ok grep -q 'delete namespace k3sdeploy-smoke-' "$SMOKE_LOG"
+assert_ok grep -q 'name: k3sdeploy-longhorn-smoke-status' "$SMOKE_LOG"
 rm -f "$SMOKE_LOG"
+
+kubectl_local(){
+  printf '%s\n' \
+    'manager-1|True|True|true' \
+    'manager-2|True|True|true' \
+    'worker-1|True|False|true' \
+    'worker-2|False|True|true' \
+    'worker-3|True|True|false'
+}
+assert_eq "$(longhorn_storage_node_count)" 2
 
 dispatch_action(){ return 23; }
 assert_ok run_menu_action 1
+assert_ok test "$LAST_WORKFLOW_SUCCEEDED" = false
+dispatch_action(){ return 0; }
+assert_ok run_menu_action 5
+assert_ok test "$LAST_WORKFLOW_SUCCEEDED" = true
 
 # Optional clean-node probes must not fail a strict-mode installation workflow.
 findmnt(){ return 1; }

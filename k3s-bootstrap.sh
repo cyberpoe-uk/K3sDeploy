@@ -421,6 +421,7 @@ join_cluster(){
 
   phase 8 8 'Running final health validation'
   validate_cluster
+  offer_longhorn_smoke
 }
 
 join_agent(){
@@ -465,6 +466,7 @@ join_agent(){
 
   phase 7 7 'Running final health validation'
   validate_cluster
+  offer_longhorn_smoke
 }
 promotion_backup(){ local stamp dir; stamp=$(date +%Y%m%d-%H%M%S); dir="/etc/k3s-bootstrap/promotion-backup-$stamp"; as_root install -d -m 700 "$dir"; for item in /etc/rancher/k3s/config.yaml /etc/rancher/node/password /etc/systemd/system/k3s-agent.service /etc/systemd/system/k3s-agent.service.env; do [[ -e $item ]] && as_root cp -a -- "$item" "$dir/"; done; info "Saved protected pre-promotion files in $dir"; }
 promote_agent(){
@@ -494,12 +496,52 @@ promote_agent(){
   as_root /usr/local/bin/k3s-agent-uninstall.sh
   phase 5 7 'Installing this machine as a manager/server'; local cfg; cfg=$(render_k3s_config join "$JOIN_TOKEN"); install_k3s "$cfg" server; JOIN_TOKEN=; cfg=; NODE_ROLE=server; persist_state
   phase 6 7 'Waiting for Ready, control-plane and etcd membership'; wait_k3s; wait_local_node; check_kube_vip_interface || warn 'kube-vip requires operator attention'; if use_longhorn; then ensure_iscsi; elif use_nfs; then ensure_nfs_client; else skip 'No managed storage host prerequisites selected'; fi
-  phase 7 7 'Running final health and quorum-oriented validation'; validate_cluster
+  phase 7 7 'Running final health and quorum-oriented validation'; validate_cluster; offer_longhorn_smoke
 }
 configure_updates_prompt(){ if ! security_updates_supported; then skip "Automatic security-update configuration is not changed on $OS_NAME; use its native update policy."; elif confirm 'Enable security-only unattended upgrades (automatic reboot disabled)?'; then configure_updates; else skip 'Unattended upgrades unchanged'; fi; }
 load_state(){ local state_content; if [[ -r $STATE_FILE ]]; then state_content=$(<"$STATE_FILE"); elif sudo -n test -r "$STATE_FILE" 2>/dev/null; then state_content=$(sudo cat "$STATE_FILE"); else return 0; fi; while IFS='=' read -r key value; do case $key in INSTALL_PROFILE|LOAD_BALANCER_MODE|STORAGE_PROVIDER|NODE_ROLE|NODE_IP|API_VIP|POOL_START|POOL_END|STORAGE_MODE|STORAGE_DEVICE|LONGHORN_PATH|LONGHORN_DEVICE_UUID|LONGHORN_REPLICAS|NFS_SERVER|NFS_EXPORT) printf -v "$key" '%s' "$value";; esac; done <<<"$state_content"; }
 show_main_menu(){
   printf '\nK3sDeploy Installer %s\nProfile: %s | Load balancer: %s | Storage: %s\n\n1. Create new K3s cluster (Node 1 manager setup)\n2. Join existing K3s cluster as a manager node (control-plane + etcd)\n3. Join K3s cluster as a worker node\n4. Upgrade K3s cluster worker node to manager (control-plane + etcd)\n5. Validate this node and cluster\n6. Repair safe local differences\n7. Exit\n\nFor most clusters use 3 or 5 manager nodes; join remaining machines as workers.\n' "$VERSION" "$INSTALL_PROFILE" "$LOAD_BALANCER_MODE" "$STORAGE_PROVIDER"
+}
+workflow_completion_summary(){
+  local action=$1
+  section 'K3sDeploy session complete'
+  case $action in
+    1)
+      printf '%s\n' \
+        '  Result: the first manager installation workflow completed.' \
+        '  Next: use this same K3sDeploy release on manager two, then manager three.'
+      ;;
+    2)
+      printf '%s\n' \
+        '  Result: this manager joined the existing control plane and etcd cluster.' \
+        '  Next: complete an odd manager count—normally three—before relying on HA.'
+      ;;
+    3)
+      printf '%s\n' \
+        '  Result: this worker joined the existing K3s cluster.' \
+        '  Next: validate cluster-wide storage from a healthy manager after storage registration completes.'
+      ;;
+    4)
+      printf '%s\n' \
+        '  Result: the worker-to-manager promotion workflow completed.' \
+        '  Next: confirm the final manager count and etcd quorum from another healthy manager.'
+      ;;
+    5)
+      printf '%s\n' \
+        '  Result: read-only validation completed.' \
+        '  Changes: no system or cluster changes were requested by this workflow.'
+      ;;
+    6)
+      printf '%s\n' \
+        '  Result: safe-repair checks and any repairs you explicitly confirmed completed.' \
+        '  Validation: the final health report above is the post-repair result; option 5 does not need to be run again.'
+      ;;
+  esac
+  printf '  Health: %s failed check(s), %s warning(s), %s untested check(s).\n' \
+    "${VALIDATION_FAILURES:-0}" "${VALIDATION_WARNINGS:-0}" "${VALIDATION_NOT_TESTED:-0}"
+  printf '  Details: %s\n' "$LOG_FILE"
+  printf '\nK3sDeploy will now exit. Run it again whenever you need validation, repair, or another node action.\n'
 }
 dispatch_action(){
   local action=$1
@@ -529,12 +571,17 @@ dispatch_action(){
 }
 run_menu_action(){
   local action=$1 rc
+  LAST_WORKFLOW_SUCCEEDED=false
   trap - ERR
   set +e
   (
     set -Eeuo pipefail
     trap 'on_error $LINENO' ERR
-    dispatch_action "$action"
+    if dispatch_action "$action"; then
+      workflow_completion_summary "$action"
+    else
+      exit $?
+    fi
   )
   rc=$?
   set -e
@@ -542,10 +589,9 @@ run_menu_action(){
   if ((rc != 0)); then
     warn "This workflow stopped safely (exit $rc). No later phases were run."
     info 'Review the message above, correct the input or system condition, then choose an installer option again.'
-  elif [[ $action =~ ^[56]$ ]]; then
-    info 'Inspection workflow finished. Review the health result above before choosing the next action.'
   else
-    ok 'Workflow finished. Returning to the installer menu.'
+    LAST_WORKFLOW_SUCCEEDED=true
+    ok 'The requested workflow completed and K3sDeploy is closing normally.'
   fi
 }
 main(){
@@ -562,6 +608,7 @@ main(){
     [[ $action == 7 ]] && return 0
     if [[ ! $action =~ ^[1-6]$ ]]; then warn 'Invalid selection; choose a number from 1 to 7.'; continue; fi
     run_menu_action "$action"
+    $LAST_WORKFLOW_SUCCEEDED && return 0
   done
 }
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

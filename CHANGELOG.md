@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- End successful menu workflows with an action-specific summary and normal installer exit, while retaining the menu after recoverable failures.
+- Defer the automatic Longhorn smoke-test prompt on a one-storage-node cluster, offer it after manager joins and repairs when multiple storage nodes are ready, and direct worker operators to a manager with administrative access.
+- Record successful Longhorn functional tests in a cluster ConfigMap so later validation reports the last passing test instead of `NOT TESTED`.
 - Remove kube-vip's unnecessary `/proc/sys/net` host mount, which current K3s/containerd/runc combinations can reject with `StartError` before the container starts.
 - Detect terminal kube-vip startup failures during rollout and print the current termination reason, exit code, logs, and pod events instead of waiting silently for five minutes.
 - Run a counted health summary automatically after safe repair, explain that it replaces a second option-5 run, and offer an optional self-cleaning Longhorn provisioning/persistence test.

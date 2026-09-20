@@ -135,7 +135,14 @@ validate_cluster(){
   else
     if ! command -v iscsiadm >/dev/null 2>&1; then report open-iscsi MISSING 'package is not installed'; elif systemctl is-active --quiet iscsid; then report open-iscsi OK; else report open-iscsi FAIL 'installed service is inactive'; fi
     validate_storage_selection || true
-    report 'Persistent storage' 'NOT TESTED' 'run tests/smoke-longhorn.sh explicitly'
+    local smoke_status tested_at tested_from tested_version
+    smoke_status=$(longhorn_smoke_status || true)
+    IFS='|' read -r tested_at tested_from tested_version <<<"$smoke_status"
+    if [[ -n $tested_at ]]; then
+      report 'Persistent storage' OK "functional test passed $tested_at from ${tested_from:-unknown node} (${tested_version:-version unknown})"
+    else
+      report 'Persistent storage' 'NOT TESTED' 'no successful functional test has been recorded'
+    fi
   fi
   validation_summary || true
 }
@@ -192,6 +199,54 @@ repair_managed_addons(){
     fi
   fi
 }
+offer_longhorn_smoke(){
+  [[ ${STORAGE_PROVIDER:-longhorn} == longhorn ]] || return 0
+  if [[ ${NODE_ROLE:-server} == agent ]]; then
+    info 'This worker does not hold an administrative kubeconfig, so it cannot create the temporary cluster-wide storage test resources.'
+    info 'After this worker is Ready, run option 6 on a healthy manager to offer the Longhorn functional test there.'
+    return 0
+  fi
+  if ((${VALIDATION_FAILURES:-0} > 0)); then
+    warn 'The Longhorn functional test is not offered while failed health checks remain.'
+    return 0
+  fi
+
+  local storage_nodes
+  storage_nodes=$(longhorn_storage_node_count)
+  printf '\nOptional Longhorn functional test\n---------------------------------\n\n'
+  if ((storage_nodes < 2)); then
+    printf '%s\n' \
+      "  Longhorn currently reports $storage_nodes ready, schedulable storage node(s)." \
+      '  A one-node test can verify provisioning, attachment, and persistence,' \
+      '  but it cannot verify replication or recovery from a node failure.' \
+      '  K3sDeploy therefore does not offer it automatically on the first node.' \
+      '  After another storage node joins, run option 6 on a manager.'
+    skip 'Automatic Longhorn functional test deferred until at least two storage nodes are ready'
+    return 0
+  fi
+
+  printf '%s\n' \
+    "  Longhorn reports $storage_nodes ready, schedulable storage nodes." \
+    '  This temporary one-replica test provisions a volume, writes data,' \
+    '  reattaches it, verifies the data, and removes the test resources.' \
+    '  It is a functional test, not a replica-loss or full HA failover test.'
+  if confirm 'Run the temporary Longhorn functional test now?'; then
+    if run_longhorn_smoke; then
+      info 'Refreshing the health report so the recorded functional-test result is included in the final summary.'
+      validate_cluster
+      if ((VALIDATION_WARNINGS > 0)); then
+        warn 'The Longhorn functional test passed, but the health-report warning(s) above still need review.'
+      else
+        ok 'Health checks and Longhorn functional verification completed successfully'
+      fi
+    else
+      error 'Longhorn functional verification failed'
+      return 1
+    fi
+  else
+    skip 'Longhorn functional smoke test was not requested; configuration checks only were completed'
+  fi
+}
 verify_after_repair(){
   validate_cluster
   info 'The health report above is the same read-only inspection provided by menu option 5; you do not need to run it again now.'
@@ -199,27 +254,7 @@ verify_after_repair(){
     warn 'Repair completed, but failed health checks remain. Resolve the reported failure before deploying workloads.'
     return 0
   fi
-  if [[ ${STORAGE_PROVIDER:-longhorn} == longhorn && ${NODE_ROLE:-server} != agent ]]; then
-    printf '\nOptional Longhorn functional test\n---------------------------------\n\n'
-    printf '%s\n' \
-      '  The health report checks configuration and component readiness.' \
-      '  This additional test temporarily provisions a volume, writes data,' \
-      '  reattaches it, verifies the data, and removes the test resources.'
-    if confirm 'Run the temporary Longhorn storage smoke test now?'; then
-      if run_longhorn_smoke; then
-        if ((VALIDATION_WARNINGS > 0)); then
-          warn 'The Longhorn functional test passed, but the health-report warning(s) above still need review.'
-        else
-          ok 'Post-repair health checks and Longhorn functional verification completed successfully'
-        fi
-      else
-        error 'Post-repair Longhorn functional verification failed'
-        return 1
-      fi
-    else
-      skip 'Longhorn functional smoke test was not requested; configuration checks only were completed'
-    fi
-  fi
+  offer_longhorn_smoke
 }
 safe_repair(){
   info "Repair mode only offers non-destructive actions"
