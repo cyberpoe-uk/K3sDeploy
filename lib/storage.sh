@@ -68,21 +68,25 @@ parse_lvm_bytes(){ awk '{gsub(/[<>,]/, "", $1); printf "%.0f", $1; exit}'; }
 vg_free_bytes(){ as_root_capture vgs --noheadings --units b --nosuffix -o vg_free "$1" 2>/dev/null | parse_lvm_bytes; }
 
 check_os_headroom(){
-  local disk=$1 root_gib available_gib disk_gib allocated_percent
+  local disk=$1 root_gib available_gib disk_gib allocated_percent recommended_root_gib
   root_gib=$(root_capacity_gib); available_gib=$(root_available_gib); disk_gib=$(block_capacity_gib "$disk")
   allocated_percent=$((root_gib * 100 / disk_gib))
-  section 'OS disk safety check'
+  recommended_root_gib=$(( (disk_gib * OS_DISK_MIN_ROOT_PERCENT + 99) / 100 ))
+  section 'OS disk allocation check'
   printf '  Root filesystem: %d GiB total, %d GiB available\n' "$root_gib" "$available_gib"
-  printf '  Root allocation: approximately %d%% of the %d GiB OS disk\n' "$allocated_percent" "$disk_gib"
-  if ((allocated_percent < OS_DISK_MIN_ROOT_PERCENT)); then
-    warn "The root filesystem is below the ${OS_DISK_MIN_ROOT_PERCENT}% OS-headroom guideline. Creating separate Longhorn storage will not enlarge root."
-    confirm "Continue with the smaller fixed root filesystem?" || return 1
-  else
-    ok "The root allocation meets the ${OS_DISK_MIN_ROOT_PERCENT}% OS-headroom guideline"
-  fi
+  printf '  OS disk:         %d GiB total\n' "$disk_gib"
+  printf '  Root allocation: approximately %d%% of the OS disk\n' "$allocated_percent"
   if ((available_gib < OS_ROOT_MIN_AVAILABLE_GIB)); then
     warn "Root has only ${available_gib} GiB available. At least ${OS_ROOT_MIN_AVAILABLE_GIB} GiB is required before creating separate Longhorn storage on the OS disk."
     return 1
+  fi
+  if ((allocated_percent < OS_DISK_MIN_ROOT_PERCENT)); then
+    warn "Root currently has ${available_gib} GiB available, but its ${root_gib} GiB size is below K3sDeploy's ${OS_DISK_MIN_ROOT_PERCENT}% allocation guideline."
+    info "For this ${disk_gib} GiB disk, the guideline recommends at least ${recommended_root_gib} GiB for root."
+    info 'Separate Longhorn storage will not enlarge root. K3s images, logs, package updates, and temporary files still use it.'
+    confirm "Continue and leave root at ${root_gib} GiB?" || return 1
+  else
+    ok "The root allocation meets the ${OS_DISK_MIN_ROOT_PERCENT}% guideline (${recommended_root_gib} GiB or more for this disk)"
   fi
 }
 
@@ -426,7 +430,7 @@ select_os_disk_partition(){
   local -a _existing_partitions=() os_choices=()
   root_disk=$(root_parent_disk) || die "Could not safely identify the physical OS disk. Choose a dedicated disk instead."
   check_os_headroom "$root_disk" || {
-    warn 'Separate storage on the OS disk is not recommended with the current root allocation/free space.'
+    warn 'Separate storage on the OS disk was not accepted with the current root size or available space.'
     return 1
   }
   root_device=$(readlink -f "$(root_source_device)")

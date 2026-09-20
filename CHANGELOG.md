@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Replace the ambiguous root-headroom warning with the current root size, free
+  capacity, calculated allocation recommendation, and a precise explanation of
+  which K3s files continue using root when Longhorn has separate storage.
 - Replace the README cover with the clearer K3sDeploy artwork.
 - Clarify that the validated MetalLB pin will be updated after a patched stable
   release is published, and explain why the installer does not follow a floating

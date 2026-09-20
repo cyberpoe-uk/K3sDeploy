@@ -159,6 +159,15 @@ assert_eq "$(printf '%s\n' '/dev/dm-0 lvm' '└─/dev/sda3 part' '  └─/dev/
 assert_eq "$(printf '  ubuntu-vg | /dev/dm-0  \n' | parse_root_lvm_vg /dev/dm-0)" ubuntu-vg
 assert_bad parse_root_lvm_vg /dev/dm-0 <<< 'other-vg|/dev/dm-1'
 assert_eq "$(printf '  <64424509440.00\n' | parse_lvm_bytes)" 64424509440
+root_capacity_gib(){ printf '57\n'; }
+root_available_gib(){ printf '47\n'; }
+block_capacity_gib(){ printf '220\n'; }
+headroom_output=$(check_os_headroom /dev/test <<< 'y' 2>&1)
+assert_ok grep -q 'Root currently has 47 GiB available' <<<"$headroom_output"
+assert_ok grep -q 'recommends at least 66 GiB for root' <<<"$headroom_output"
+assert_ok grep -q 'K3s images, logs, package updates, and temporary files still use it' <<<"$headroom_output"
+assert_ok grep -Fq 'confirm "Continue and leave root at ${root_gib} GiB?"' "$ROOT/lib/storage.sh"
+assert_bad check_os_headroom /dev/test <<< 'n' >/dev/null 2>&1
 LONGHORN_NODE_TEST_STATUS='True|True|true'
 kubectl_local(){
   case "$*" in
