@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 preflight_collect(){
   detect_operating_system
+  detect_virtualization
   HOST_NOW=$(short_hostname)
   PRIMARY_IFACE=$(detect_interface || true)
   DETECTED_IP=$(detect_node_ip "$PRIMARY_IFACE" || true)
@@ -15,6 +16,15 @@ preflight_collect(){
   TIME_SYNC=unknown; command -v timedatectl >/dev/null && TIME_SYNC=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo unknown)
   return 0
 }
+detect_virtualization(){
+  VIRTUALIZATION_TYPE=none
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    VIRTUALIZATION_TYPE=$(systemd-detect-virt --vm 2>/dev/null || true)
+    VIRTUALIZATION_TYPE=${VIRTUALIZATION_TYPE:-none}
+  fi
+  export VIRTUALIZATION_TYPE
+}
+virtual_machine_detected(){ [[ ${VIRTUALIZATION_TYPE:-none} != none ]]; }
 basic_host_sanity(){
   [[ $OS_PACKAGE_MANAGER != unsupported ]] || die "K3sDeploy detected $OS_NAME, but does not yet support its package manager. Supported package managers: apt, dnf, yum, and zypper."
   [[ $(uname -m) == x86_64 || $(uname -m) == aarch64 || $(uname -m) == arm64 ]] || die "Unsupported CPU architecture: $(uname -m)"
@@ -30,6 +40,7 @@ preflight_show(){ section 'System preflight'; cat <<EOF
   Architecture:      $(uname -m)
   CPU / RAM:         $CPU_COUNT CPUs / $RAM_GIB GiB
   Kernel:            $KERNEL_VERSION
+  Virtualization:    ${VIRTUALIZATION_TYPE:-none detected}
   Root filesystem:   $ROOT_FILESYSTEM
   Swap:              $SWAP_STATUS
   Root free space:   $DISK_FREE

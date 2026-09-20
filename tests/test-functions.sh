@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 source "$ROOT/lib/common.sh"
+# shellcheck source=../lib/preflight.sh
+source "$ROOT/lib/preflight.sh"
 pass=0; fail=0
 assert_ok(){ if "$@"; then ((++pass)); else echo "FAIL expected success: $*"; ((++fail)); fi; }
 assert_bad(){ if "$@"; then echo "FAIL expected failure: $*"; ((++fail)); else ((++pass)); fi; }
@@ -66,6 +68,11 @@ assert_ok grep -q '^  - local-storage$' <<<"$rendered"
 assert_ok grep -q '^etcd-snapshot-compress: true$' <<<"$rendered"
 assert_ok grep -q '^etcd-snapshot-retention: 5$' <<<"$rendered"
 assert_ok grep -q '^etcd-snapshot-schedule-cron: "0 \*/12 \* \* \*"$' <<<"$rendered"
+ETCD_SNAPSHOT_POLICY=external
+external_snapshot_rendered=$(render_k3s_config join 'secret-test-token')
+assert_ok grep -q '^etcd-disable-snapshots: true$' <<<"$external_snapshot_rendered"
+assert_bad grep -q '^etcd-snapshot-' <<<"$external_snapshot_rendered"
+ETCD_SNAPSHOT_POLICY=managed
 LOAD_BALANCER_MODE=servicelb STORAGE_PROVIDER=local-path
 servicelb_rendered=$(render_k3s_config first)
 assert_bad grep -q '^disable:$' <<<"$servicelb_rendered"
@@ -85,12 +92,18 @@ assert_ok grep -q '^token: "agent-secret-token"$' <<<"$agent_rendered"
 assert_bad grep -q '^advertise-address:' <<<"$agent_rendered"
 assert_bad grep -q '^disable:' <<<"$agent_rendered"
 assert_bad grep -q '^etcd-snapshot-' <<<"$agent_rendered"
+assert_bad grep -q '^etcd-disable-snapshots:' <<<"$agent_rendered"
 # shellcheck source=../lib/etcd-snapshot.sh
 source "$ROOT/lib/etcd-snapshot.sh"
 snapshot_config_sample='data-dir: "/srv/k3s-data"
 etcd-snapshot-dir: '\''/srv/k3s-snapshots'\'' # protected snapshots'
 assert_eq "$(parse_k3s_yaml_scalar data-dir <<<"$snapshot_config_sample")" /srv/k3s-data
 assert_eq "$(parse_k3s_yaml_scalar etcd-snapshot-dir <<<"$snapshot_config_sample")" /srv/k3s-snapshots
+VIRTUALIZATION_TYPE=none
+assert_bad virtual_machine_detected
+VIRTUALIZATION_TYPE=kvm
+assert_ok virtual_machine_detected
+VIRTUALIZATION_TYPE=none
 # shellcheck source=../lib/etcd-recovery.sh
 source "$ROOT/lib/etcd-recovery.sh"
 quorum_sample='Sep 20 k3s-demo1 k3s[43591]: {"level":"warn","msg":"failed to publish local member to cluster through raft","error":"context deadline exceeded"}'
@@ -120,6 +133,16 @@ assert_bad etcd_recovery_backup_space_sufficient 104857601 209715200
 source "$ROOT/config/defaults.env"
 source "$ROOT/lib/storage.sh"
 source "$ROOT/lib/longhorn.sh"
+VIRTUALIZATION_TYPE=kvm
+assert_ok grep -q 'kvm virtual disk' <<<"$(show_virtual_disk_capacity_note 161)"
+virtual_guidance=$(show_additional_storage_guidance)
+assert_ok grep -q 'kvm virtual machine' <<<"$virtual_guidance"
+assert_bad grep -q 'Physical machine' <<<"$virtual_guidance"
+VIRTUALIZATION_TYPE=none
+assert_eq "$(show_virtual_disk_capacity_note 161)" ''
+physical_guidance=$(show_additional_storage_guidance)
+assert_ok grep -q 'Physical machine' <<<"$physical_guidance"
+assert_bad grep -q 'hypervisor or cloud' <<<"$physical_guidance"
 assert_ok replica_counts_ready 1 1
 assert_ok replica_counts_ready 2 2
 assert_ok replica_counts_ready 1 2

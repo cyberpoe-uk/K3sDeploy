@@ -96,17 +96,38 @@ warn_small_longhorn_capacity(){
 
 show_additional_storage_guidance(){
   section 'Recommended storage actions'
-  cat <<EOF
-  - Virtual machine: use your hypervisor or cloud console to attach a new empty
-    virtual disk. Follow that platform's hot-add or shutdown instructions, then
-    confirm the disk appears in 'lsblk' and rerun K3sDeploy using option 3.
+  if virtual_machine_detected; then
+    cat <<EOF
+  - This is a ${VIRTUALIZATION_TYPE} virtual machine. Use your hypervisor or cloud
+    console to attach a new empty virtual disk. Follow that platform's hot-add or
+    shutdown instructions, confirm the disk appears in 'lsblk', then rerun
+    K3sDeploy using option 3.
+EOF
+  else
+    cat <<'EOF'
   - Physical machine: install an empty SSD or NVMe drive, confirm Linux detects
     it with 'lsblk', then rerun K3sDeploy using option 3.
+EOF
+  fi
+  cat <<EOF
   - Existing OS disk: choose option 2 only when K3sDeploy reports usable LVM
     free extents, physical unallocated space, or an eligible empty partition.
 
 SSD or NVMe storage is recommended for K3s database responsiveness and
 Longhorn stability. Never select a disk that contains data you need to keep.
+EOF
+}
+
+show_virtual_disk_capacity_note(){
+  local difference=$1
+  virtual_machine_detected || return 0
+  cat <<EOF
+Capacity note
+   This ${VIRTUALIZATION_TYPE} virtual disk is ${difference} GiB larger than the root filesystem.
+   Expanding a virtual disk in the hypervisor does not automatically enlarge root.
+   Root eligibility uses the filesystem size, not the underlying virtual disk size.
+   Option 2 checks the other layers for free LVM extents and unallocated space.
+
 EOF
 }
 
@@ -557,15 +578,9 @@ select_storage(){
   root_gib=$(root_capacity_gib); available_gib=$(root_available_gib); root_disk=$(root_parent_disk || true)
   root_fstype=$(findmnt -no FSTYPE /)
   [[ -z $root_disk ]] || root_disk_gib=$(block_capacity_gib "$root_disk")
-  if [[ $root_disk_gib =~ ^[0-9]+$ ]] && ((root_disk_gib > root_gib)); then
+  if virtual_machine_detected && [[ $root_disk_gib =~ ^[0-9]+$ ]] && ((root_disk_gib > root_gib)); then
     disk_root_difference=$((root_disk_gib-root_gib))
-    printf -v capacity_note '%s\n' \
-      'Capacity note' \
-      "   The OS disk is ${disk_root_difference} GiB larger than the root filesystem." \
-      '   Expanding a physical or virtual disk does not automatically enlarge root.' \
-      '   Root eligibility uses the filesystem size, not the underlying disk size.' \
-      '   Option 2 checks the other layers for free LVM extents and unallocated space.' \
-      ''
+    capacity_note=$(show_virtual_disk_capacity_note "$disk_root_difference")
   fi
   if [[ $root_fstype != ext4 && $root_fstype != xfs ]] || ! capacity_meets_minimum "$root_gib" "$LONGHORN_ROOT_MIN_GIB" || ! capacity_meets_minimum "$available_gib" "$LONGHORN_ROOT_MIN_AVAILABLE_GIB"; then
     root_eligible=false

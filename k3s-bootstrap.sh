@@ -344,10 +344,23 @@ collect_metallb_pool(){
     info 'Reserve the complete range or enter a different range.'
   done
 }
-persist_state(){ local body; body=$(printf 'INSTALL_PROFILE=%s\nLOAD_BALANCER_MODE=%s\nSTORAGE_PROVIDER=%s\nNODE_ROLE=%s\nNODE_IP=%s\nAPI_VIP=%s\nPOOL_START=%s\nPOOL_END=%s\nSTORAGE_MODE=%s\nSTORAGE_DEVICE=%s\nLONGHORN_PATH=%s\nLONGHORN_DEVICE_UUID=%s\nLONGHORN_REPLICAS=%s\nNFS_SERVER=%s\nNFS_EXPORT=%s\n' "$INSTALL_PROFILE" "$LOAD_BALANCER_MODE" "$STORAGE_PROVIDER" "${NODE_ROLE:-server}" "$NODE_IP" "$API_VIP" "${POOL_START:-}" "${POOL_END:-}" "$STORAGE_MODE" "${STORAGE_DEVICE:-}" "${LONGHORN_PATH:-}" "${LONGHORN_DEVICE_UUID:-}" "${LONGHORN_REPLICAS:-$LONGHORN_DEFAULT_REPLICAS}" "${NFS_SERVER:-}" "${NFS_EXPORT:-}"); write_root_file "$STATE_FILE" 600 "$body" || true; }
+persist_state(){
+  local body
+  body=$(printf 'INSTALL_PROFILE=%s\nLOAD_BALANCER_MODE=%s\nSTORAGE_PROVIDER=%s\nETCD_SNAPSHOT_POLICY=%s\nNODE_ROLE=%s\nNODE_IP=%s\nAPI_VIP=%s\nPOOL_START=%s\nPOOL_END=%s\nSTORAGE_MODE=%s\nSTORAGE_DEVICE=%s\nLONGHORN_PATH=%s\nLONGHORN_DEVICE_UUID=%s\nLONGHORN_REPLICAS=%s\nNFS_SERVER=%s\nNFS_EXPORT=%s\n' \
+    "$INSTALL_PROFILE" "$LOAD_BALANCER_MODE" "$STORAGE_PROVIDER" "${ETCD_SNAPSHOT_POLICY:-managed}" \
+    "${NODE_ROLE:-server}" "$NODE_IP" "$API_VIP" "${POOL_START:-}" "${POOL_END:-}" \
+    "$STORAGE_MODE" "${STORAGE_DEVICE:-}" "${LONGHORN_PATH:-}" "${LONGHORN_DEVICE_UUID:-}" \
+    "${LONGHORN_REPLICAS:-$LONGHORN_DEFAULT_REPLICAS}" "${NFS_SERVER:-}" "${NFS_EXPORT:-}")
+  write_root_file "$STATE_FILE" 600 "$body" || true
+}
 set_hostname_if_needed(){ [[ $(short_hostname) == "$DESIRED_HOSTNAME" ]] && return; need_cmd hostnamectl; info "Changing this node hostname to $DESIRED_HOSTNAME as shown in the accepted plan"; as_root hostnamectl set-hostname "$DESIRED_HOSTNAME"; }
 summary(){
-  local address_detail=$2
+  local address_detail=$2 backup_detail
+  if [[ ${NODE_ROLE:-server} == agent ]]; then
+    backup_detail='not applicable, workers do not store embedded etcd'
+  else
+    backup_detail=$(snapshot_policy_description)
+  fi
   section 'Installation plan'
   cat <<EOF
   Installer:        K3sDeploy $VERSION
@@ -362,6 +375,7 @@ summary(){
   Storage mode:     $STORAGE_MODE${LONGHORN_PATH:+ ($LONGHORN_PATH)}
   Storage source:   ${STORAGE_DEVICE:-externally managed / none}
   Storage plan:     ${STORAGE_DESCRIPTION:-use existing configured storage}
+  Etcd backups:     $backup_detail
   K3s ServiceLB:    $(use_servicelb && printf 'enabled' || printf 'disabled')
 EOF
   if use_metallb; then printf '  MetalLB address pool: %s\n' "$address_detail"; else printf '  LoadBalancer addresses: %s\n' "$address_detail"; fi
@@ -373,6 +387,7 @@ new_cluster(){
   phase 1 8 'Collecting node, network and storage choices'
   collect_local_identity
   collect_new_cluster_vip
+  collect_etcd_snapshot_policy
   prepare_storage_choice
   if use_metallb; then collect_metallb_pool; else skip "MetalLB address pool omitted ($LOAD_BALANCER_MODE selected)"; fi
   LONGHORN_REPLICAS=$LONGHORN_DEFAULT_REPLICAS
@@ -421,6 +436,7 @@ join_cluster(){
   collect_join_access server
   collect_local_identity
   check_identity_network
+  collect_etcd_snapshot_policy
   prepare_storage_choice
 
   phase 2 8 'Checking the existing cluster and local node'
@@ -523,6 +539,7 @@ promote_agent(){
     prompt_required API_VIP 'Existing cluster API VIP'
   fi
   valid_ip_or_die 'API VIP' "$API_VIP"; port_reachable "$API_VIP" 6443 || die "API VIP $API_VIP:6443 is unreachable"
+  collect_etcd_snapshot_policy
   phase 2 7 'Confirming cluster-side drain and node removal'
   warn 'Promotion briefly removes this machine from Kubernetes and reinstalls its local K3s role.'
   warn 'The official agent uninstaller removes local K3s state, kubelet state, emptyDir data, and local-path PV data.'
@@ -541,7 +558,23 @@ promote_agent(){
   phase 7 7 'Running final health and quorum-oriented validation'; validate_cluster; require_healthy_installation; create_milestone_etcd_snapshot manager-promoted; offer_longhorn_smoke
 }
 configure_updates_prompt(){ if ! security_updates_supported; then skip "Automatic security-update configuration is not changed on $OS_NAME. Use its native update policy."; elif confirm 'Enable security-only unattended upgrades (automatic reboot disabled)?'; then configure_updates; else skip 'Unattended upgrades unchanged'; fi; }
-load_state(){ local state_content; if [[ -r $STATE_FILE ]]; then state_content=$(<"$STATE_FILE"); elif sudo -n test -r "$STATE_FILE" 2>/dev/null; then state_content=$(sudo cat "$STATE_FILE"); else return 0; fi; while IFS='=' read -r key value; do case $key in INSTALL_PROFILE|LOAD_BALANCER_MODE|STORAGE_PROVIDER|NODE_ROLE|NODE_IP|API_VIP|POOL_START|POOL_END|STORAGE_MODE|STORAGE_DEVICE|LONGHORN_PATH|LONGHORN_DEVICE_UUID|LONGHORN_REPLICAS|NFS_SERVER|NFS_EXPORT) printf -v "$key" '%s' "$value";; esac; done <<<"$state_content"; }
+load_state(){
+  local state_content
+  if [[ -r $STATE_FILE ]]; then
+    state_content=$(<"$STATE_FILE")
+  elif sudo -n test -r "$STATE_FILE" 2>/dev/null; then
+    state_content=$(sudo cat "$STATE_FILE")
+  else
+    return 0
+  fi
+  while IFS='=' read -r key value; do
+    case $key in
+      INSTALL_PROFILE|LOAD_BALANCER_MODE|STORAGE_PROVIDER|ETCD_SNAPSHOT_POLICY|NODE_ROLE|NODE_IP|API_VIP|POOL_START|POOL_END|STORAGE_MODE|STORAGE_DEVICE|LONGHORN_PATH|LONGHORN_DEVICE_UUID|LONGHORN_REPLICAS|NFS_SERVER|NFS_EXPORT)
+        printf -v "$key" '%s' "$value"
+        ;;
+    esac
+  done <<<"$state_content"
+}
 show_main_menu(){
   local variable=$1 default=1
   [[ ${K3S_INSTALLED:-no} == yes ]] && default=5

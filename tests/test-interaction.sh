@@ -65,6 +65,17 @@ else
   ((++fail))
 fi
 
+VIRTUALIZATION_TYPE=none
+ETCD_SNAPSHOT_POLICY=external
+collect_etcd_snapshot_policy <<< '' >/dev/null
+assert_eq "$ETCD_SNAPSHOT_POLICY" managed
+ETCD_SNAPSHOT_POLICY=managed
+collect_etcd_snapshot_policy <<< $'2\nMANAGE BACKUPS EXTERNALLY' >/dev/null
+assert_eq "$ETCD_SNAPSHOT_POLICY" external
+collect_etcd_snapshot_policy <<< $'2\nno' >/dev/null
+assert_eq "$ETCD_SNAPSHOT_POLICY" managed
+ETCD_SNAPSHOT_POLICY=managed
+
 configure_advanced_profile <<< $'3\ny\n4'
 assert_eq "$INSTALL_PROFILE" advanced
 assert_eq "$LOAD_BALANCER_MODE" external
@@ -130,6 +141,7 @@ POOL_START=10.10.10.110
 POOL_END=10.10.10.115
 plan_output=$(summary 'Create test cluster' "$POOL_START-$POOL_END")
 assert_ok grep -q '^  MetalLB address pool: 10.10.10.110-10.10.10.115$' <<<"$plan_output"
+assert_ok grep -q '^  Etcd backups:     managed locally, 5 scheduled and 1 per milestone type$' <<<"$plan_output"
 assert_eq "$(grep -c '10.10.10.110' <<<"$plan_output")" 1
 
 kubectl_local(){

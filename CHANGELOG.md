@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add an explicit embedded-etcd backup policy to manager installation and promotion. The recommended policy keeps five scheduled snapshots per manager and prunes each named milestone category to its newest copy. The advanced opt-out requires exact acknowledgement, disables new K3s and milestone snapshots, and preserves existing snapshot files.
+- Explain that one surviving manager can restore the control plane with its snapshot and matching token, while a surviving worker cannot. Clarify the need for protected off-node copies and the limits of uncoordinated hypervisor snapshots.
+- Detect virtual machines before showing expanded-virtual-disk and hypervisor guidance. Physical machines now receive only relevant physical-disk guidance.
 - Configure compressed embedded-etcd snapshots on every managed server with a twice-daily schedule and five-snapshot retention, then create official milestone snapshots after healthy manager installation, join, promotion, quorum recovery, and snapshot restore workflows. Safe repair offers one baseline snapshot when an older healthy manager has no K3sDeploy milestone.
 - Add guarded local embedded-etcd snapshot restore as option 8. It discovers the configured snapshot directory, creates a current-state safety snapshot when possible, preserves stopped server state, requires manager-isolation and exact restore confirmation, resets membership through the official K3s restore path, and validates the result without claiming to restore persistent-volume contents.
 - Explain why increasing an underlying physical or virtual disk does not enlarge the root filesystem or make shared-root Longhorn storage eligible, while directing the operator to the separate LVM and unallocated-space checks.

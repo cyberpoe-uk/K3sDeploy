@@ -5,6 +5,56 @@ ETCD_RESTORE_SELECTED=
 ETCD_RESTORE_SERVICE_STOPPED=false
 readonly ETCD_RESTORE_CANCEL_RC=78
 
+managed_etcd_snapshots(){ [[ ${ETCD_SNAPSHOT_POLICY:-managed} != external ]]; }
+
+snapshot_policy_description(){
+  if managed_etcd_snapshots; then
+    printf 'managed locally, %s scheduled and %s per milestone type\n' \
+      "${ETCD_SNAPSHOT_RETENTION:-5}" "${ETCD_MILESTONE_RETENTION:-1}"
+  else
+    printf 'external backup ownership, K3s snapshots disabled\n'
+  fi
+}
+
+collect_etcd_snapshot_policy(){
+  local choice exact
+  section 'Embedded-etcd backup policy'
+  printf '%s\n' \
+    '  Every manager stores its own embedded-etcd database.' \
+    '  With managed snapshots, each manager keeps a bounded local snapshot set.' \
+    '  One surviving manager can restore the control plane when its snapshot and' \
+    '  matching server token survive. A worker alone cannot restore embedded etcd.' \
+    '  Local snapshots do not survive loss of every manager or manager disk.' \
+    '  Copy important snapshots and the matching token to protected off-node storage.'
+  if virtual_machine_detected; then
+    printf '%s\n' \
+      '' \
+      "  Virtual machine detected: ${VIRTUALIZATION_TYPE}." \
+      '  Hypervisor backups can complement this protection, but VM snapshots taken' \
+      '  at different times are not a coordinated etcd and application-data backup.'
+  fi
+  printf '\n'
+  menu_select choice 'Choose who manages embedded-etcd backups' 1 \
+    "Managed local snapshots [Recommended - keep ${ETCD_SNAPSHOT_RETENTION:-5} scheduled and ${ETCD_MILESTONE_RETENTION:-1} per milestone type]" \
+    'External backup ownership [Advanced - disable K3s snapshots]'
+  if ((choice == 1)); then
+    ETCD_SNAPSHOT_POLICY=managed
+    return 0
+  fi
+  printf '%s\n' \
+    '' \
+    '  K3sDeploy will disable scheduled and milestone snapshots on this manager.' \
+    '  Existing snapshot files are preserved. Your external backup process must' \
+    '  protect both embedded-etcd state and the matching K3s server token.'
+  read -r -p "Type 'MANAGE BACKUPS EXTERNALLY' to accept responsibility: " exact
+  if [[ $exact == 'MANAGE BACKUPS EXTERNALLY' ]]; then
+    ETCD_SNAPSHOT_POLICY=external
+  else
+    warn 'External backup ownership was not confirmed. Managed snapshots remain selected.'
+    ETCD_SNAPSHOT_POLICY=managed
+  fi
+}
+
 parse_k3s_yaml_scalar(){
   local key=$1
   awk -v key="$key" '
@@ -63,6 +113,7 @@ newest_snapshot_matching(){
 create_etcd_snapshot(){
   local label=$1 directory before newest
   ETCD_LAST_SNAPSHOT=
+  managed_etcd_snapshots || { skip "Etcd snapshot omitted because external backup ownership is selected: k3sdeploy-$label"; return 0; }
   if $DRY_RUN; then
     change "Would create an official K3s etcd snapshot named k3sdeploy-$label"
     return 0
@@ -80,7 +131,14 @@ create_etcd_snapshot(){
   newest=$(newest_snapshot_matching "$directory" "k3sdeploy-$label" || true)
   [[ -n $newest && $newest != "$before" ]] || die "K3s reported snapshot completion, but a new snapshot was not found in $directory."
   ETCD_LAST_SNAPSHOT=$newest
+  as_root chmod 700 "$directory"
+  as_root chmod 600 "$ETCD_LAST_SNAPSHOT"
   ok "Etcd snapshot saved locally at $ETCD_LAST_SNAPSHOT"
+  if as_root k3s etcd-snapshot prune --name "k3sdeploy-$label" --snapshot-retention "${ETCD_MILESTONE_RETENTION:-1}"; then
+    info "Retained the newest ${ETCD_MILESTONE_RETENTION:-1} k3sdeploy-$label milestone snapshot on this manager"
+  else
+    warn "The new snapshot is safe, but older k3sdeploy-$label snapshots could not be pruned automatically."
+  fi
   warn 'A local snapshot shares this node failure domain. Copy snapshots and the server token to protected off-node storage.'
 }
 
@@ -90,6 +148,7 @@ create_milestone_etcd_snapshot(){
 
 offer_initial_etcd_snapshot(){
   local directory existing
+  managed_etcd_snapshots || { skip 'Baseline snapshot omitted because external backup ownership is selected'; return 0; }
   systemd_unit_exists k3s || return 0
   as_root_capture test -d "$(k3s_data_directory)/server/db/etcd/member" || return 0
   as_root_capture k3s kubectl get --raw=/readyz >/dev/null 2>&1 || return 0

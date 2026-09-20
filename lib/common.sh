@@ -9,6 +9,7 @@ if [[ -t 1 ]]; then K3SDEPLOY_STDOUT_IS_TTY=true; else K3SDEPLOY_STDOUT_IS_TTY=f
 INSTALL_PROFILE=${INSTALL_PROFILE:-recommended}
 LOAD_BALANCER_MODE=${LOAD_BALANCER_MODE:-metallb}
 STORAGE_PROVIDER=${STORAGE_PROVIDER:-longhorn}
+ETCD_SNAPSHOT_POLICY=${ETCD_SNAPSHOT_POLICY:-managed}
 LOG_FILE=${LOG_FILE:-/var/log/k3s-bootstrap/k3s-bootstrap-$(date +%Y%m%d-%H%M%S).log}
 STATE_FILE=${STATE_FILE:-/etc/k3s-bootstrap/config}
 CONFIG_FILE=${CONFIG_FILE:-/etc/rancher/k3s/config.yaml}
