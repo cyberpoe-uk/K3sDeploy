@@ -5,15 +5,16 @@
 
 set -Eeuo pipefail
 
-BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
+if [[ ! -t 1 || ${TERM:-dumb} == dumb || -n ${NO_COLOR:-} ]]; then YELLOW=; GREEN=; RED=; NC=; fi
 
 readonly REPOSITORY_URL="${K3S_DEPLOY_REPOSITORY_URL:-https://github.com/cyberpoe-uk/K3sDeploy.git}"
 TEMP_DIR=""
 
-info() { printf '%b\n' "${BLUE}[K3SDEPLOY]${NC} $*"; }
+info() { printf '%b\n' "${YELLOW}[K3SDEPLOY]${NC} $*"; }
 success() { printf '%b\n' "${GREEN}[SUCCESS]${NC} $*"; }
 die() { printf '%b\n' "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
@@ -111,8 +112,12 @@ latest_stable_tag() {
 }
 
 main() {
-    local tag release_version
+    local tag release_version argument
     trap cleanup EXIT
+
+    for argument in "$@"; do
+        if [[ $argument == --no-color ]]; then YELLOW=; GREEN=; RED=; NC=; break; fi
+    done
 
     info "Starting the K3sDeploy launcher."
     info "It will download the latest stable tagged release and open its interactive menu."

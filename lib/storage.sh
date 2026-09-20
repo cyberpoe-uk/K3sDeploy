@@ -201,14 +201,14 @@ unused_partitions(){
 }
 
 choose_existing_partition(){
-  local disk=$1 answer index=1 partition
-  local -a candidates=()
+  local disk=$1 answer partition
+  local -a candidates=() menu_options=()
   mapfile -t candidates < <(unused_partitions "$disk")
   ((${#candidates[@]})) || die "No unused partition of at least ${LONGHORN_DATA_MIN_GIB} GiB was found on $disk"
-  printf '\nUnused partitions on the OS disk:\n'
-  for partition in "${candidates[@]}"; do printf '  %d. %-20s %s\n' "$index" "$partition" "$(lsblk -dnro SIZE "$partition")"; ((index+=1)); done
+  section 'Unused partitions on the OS disk'
+  for partition in "${candidates[@]}"; do menu_options+=("$partition — $(lsblk -dnro SIZE "$partition")"); done
   while true; do
-    read -r -p 'Choose a partition number: ' answer
+    menu_select answer 'Choose an unused partition' 1 "${menu_options[@]}"
     [[ $answer =~ ^[0-9]+$ ]] && ((answer>=1 && answer<=${#candidates[@]})) && break
     warn "Choose a number from 1 to ${#candidates[@]}."
   done
@@ -402,7 +402,7 @@ select_root_storage(){
 select_os_disk_partition(){
   local root_disk table_type region free_start free_end free_bytes free_gib maximum_gib recommended_gib requested_gib subchoice
   local root_device root_type lvm_vg= lvm_free_bytes= lvm_free_gib=0 lvm_status=not-applicable default_subchoice=4
-  local -a _existing_partitions=()
+  local -a _existing_partitions=() os_choices=()
   root_disk=$(root_parent_disk) || die "Could not safely identify the physical OS disk. Choose a dedicated disk instead."
   check_os_headroom "$root_disk" || {
     warn 'Separate storage on the OS disk is not recommended with the current root allocation/free space.'
@@ -431,24 +431,24 @@ select_os_disk_partition(){
   mapfile -t _existing_partitions < <(unused_partitions "$root_disk")
   section "OS-disk storage choices: $root_disk"
   if [[ $lvm_status == inspection-failed ]]; then
-    printf '  1. Create an LVM logical volume (unavailable: LVM inspection failed)\n'
+    os_choices+=('Create an LVM logical volume — unavailable: LVM inspection failed')
   elif [[ $lvm_status == not-applicable ]]; then
-    printf '  1. Create an LVM logical volume (unavailable: root is not on LVM)\n'
+    os_choices+=('Create an LVM logical volume — unavailable: root is not on LVM')
   elif ((lvm_free_gib > LONGHORN_DATA_MIN_GIB)); then
-    printf '  1. Create a Longhorn logical volume from LVM free space (%d GiB free)\n' "$lvm_free_gib"
+    os_choices+=("Create a Longhorn logical volume — $lvm_free_gib GiB LVM space free")
     default_subchoice=1
   else
-    printf '  1. Create an LVM logical volume (unavailable: %d GiB free in the root volume group)\n' "$lvm_free_gib"
+    os_choices+=("Create an LVM logical volume — unavailable: $lvm_free_gib GiB free")
   fi
   if ((free_gib > LONGHORN_DATA_MIN_GIB)); then
-    printf '  2. Create a physical partition from unallocated disk space (%d GiB free)\n' "$free_gib"
+    os_choices+=("Create a physical partition — $free_gib GiB unallocated")
     [[ $default_subchoice == 4 ]] && default_subchoice=2
   else
-    printf '  2. Create a physical partition (unavailable: %d GiB unallocated outside existing partitions)\n' "$free_gib"
+    os_choices+=("Create a physical partition — unavailable: $free_gib GiB unallocated")
   fi
-  printf '  3. Use an existing unused partition (%d eligible found)\n' "${#_existing_partitions[@]}"
+  os_choices+=("Use an existing unused partition — ${#_existing_partitions[@]} eligible found")
   ((${#_existing_partitions[@]} > 0)) && [[ $default_subchoice == 4 ]] && default_subchoice=3
-  printf '  4. Return to the main storage choices\n'
+  os_choices+=('Return to the main storage choices')
   printf '\n  Safety: no root filesystem, logical volume, or existing partition will be shrunk or moved.\n'
   if [[ $lvm_status == inspected && $free_gib == 0 ]]; then
     printf '  Note: 0 GiB physical space is expected on a fully partitioned LVM disk.\n'
@@ -463,7 +463,7 @@ select_os_disk_partition(){
     show_additional_storage_guidance
   fi
   printf '\n'
-  read -r -p "Selection [$default_subchoice]: " subchoice; subchoice=${subchoice:-$default_subchoice}
+  menu_select subchoice 'Choose an OS-disk storage action' "$default_subchoice" "${os_choices[@]}"
   case $subchoice in
     1)
       [[ $lvm_status == inspected ]] && ((lvm_free_gib > LONGHORN_DATA_MIN_GIB)) || { warn 'The LVM choice is unavailable because it could not be inspected safely or does not have enough free space.'; return 1; }
@@ -502,8 +502,8 @@ select_os_disk_partition(){
 }
 
 select_dedicated_disk(){
-  local root_disk device type children fstype mounts pttype answer index=1 model size
-  local -a candidates=()
+  local root_disk device type children fstype mounts pttype answer model size
+  local -a candidates=() menu_options=()
   root_disk=$(root_parent_disk || true); list_disks
   while read -r device type; do
     [[ $type == disk ]] || continue
@@ -519,9 +519,9 @@ select_dedicated_disk(){
     return 1
   fi
   section 'Eligible empty disks'
-  for device in "${candidates[@]}"; do model=$(lsblk -dnro MODEL "$device"); size=$(lsblk -dnro SIZE "$device"); printf '  %d. %-14s %-10s %s\n' "$index" "$device" "$size" "${model:-unknown model}"; ((index+=1)); done
+  for device in "${candidates[@]}"; do model=$(lsblk -dnro MODEL "$device"); size=$(lsblk -dnro SIZE "$device"); menu_options+=("$device — $size — ${model:-unknown model}"); done
   while true; do
-    read -r -p 'Choose a disk number: ' answer
+    menu_select answer 'Choose an empty Longhorn disk' 1 "${menu_options[@]}"
     [[ $answer =~ ^[0-9]+$ ]] && ((answer>=1 && answer<=${#candidates[@]})) && break
     warn "Choose a number from 1 to ${#candidates[@]}."
   done
@@ -563,18 +563,18 @@ Detected storage
   Root filesystem: ${root_gib} GiB total, ${available_gib} GiB available (${root_fstype})
   OS disk:         ${root_disk:-unknown} (${root_disk_gib} GiB)
 
-Storage choices
+Storage guidance
 
-1. Use the root filesystem (simplest)$($root_eligible || printf ' - UNAVAILABLE')
+Root filesystem$($root_eligible || printf ' — UNAVAILABLE')
    Requires ext4/XFS, ${LONGHORN_ROOT_MIN_GIB} GiB total and ${LONGHORN_ROOT_MIN_AVAILABLE_GIB} GiB available.
    Detected: ${root_fstype}, ${root_gib} GiB total and ${available_gib} GiB available.
    Longhorn reserves ${LONGHORN_ROOT_RESERVED_PERCENT}% for OS headroom, but this is not a hard quota.
 
-2. Create separate storage on the OS disk (guided partition or LVM)
+Separate storage on the OS disk
    The installer detects both physical unallocated space and free Linux LVM
    extents, recommends a size, and never shrinks or moves existing data.
 
-3. Use a separate disk: physical or virtual (recommended for important data)
+Separate physical or virtual disk (recommended for important data)
    Best isolation. SSD or NVMe is recommended. The disk must be empty.
    ${LONGHORN_DATA_RECOMMENDED_GIB} GiB is recommended;
    the ${LONGHORN_DATA_MIN_GIB} GiB installer floor is intended only for small labs.
@@ -582,7 +582,10 @@ Storage choices
 All separate storage is mounted by UUID at $LONGHORN_STANDARD_PATH.
 EOF
     printf '\n'
-    read -r -p "Selection [$default_choice]: " choice; choice=${choice:-$default_choice}
+    menu_select choice 'Choose Longhorn storage' "$default_choice" \
+      "Use the root filesystem — simplest$($root_eligible || printf ', unavailable')" \
+      'Create separate storage on the OS disk — guided partition or LVM' \
+      'Use a separate physical or virtual disk — best isolation'
     case $choice in
       1) if select_root_storage; then return; fi;;
       2) if select_os_disk_partition; then return; fi;;

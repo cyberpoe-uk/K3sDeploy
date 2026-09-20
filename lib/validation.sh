@@ -12,13 +12,18 @@ VALIDATION_FAILURES=0
 VALIDATION_WARNINGS=0
 VALIDATION_NOT_TESTED=0
 report(){
-  local label=$1 status=$2 detail=${3:-}
+  local label=$1 status=$2 detail=${3:-} status_colour reset
   case $status in
-    FAIL) VALIDATION_FAILURES=$((VALIDATION_FAILURES+1));;
-    WARN) VALIDATION_WARNINGS=$((VALIDATION_WARNINGS+1));;
-    'NOT TESTED') VALIDATION_NOT_TESTED=$((VALIDATION_NOT_TESTED+1));;
+    OK) status_colour=$(colour 92);;
+    FAIL) VALIDATION_FAILURES=$((VALIDATION_FAILURES+1)); status_colour=$(colour '1;91');;
+    WARN) VALIDATION_WARNINGS=$((VALIDATION_WARNINGS+1)); status_colour=$(colour '38;5;208');;
+    MISSING) status_colour=$(colour '38;5;208');;
+    'NOT TESTED') VALIDATION_NOT_TESTED=$((VALIDATION_NOT_TESTED+1)); status_colour=$(colour '38;5;208');;
+    SKIP) status_colour=$(colour 94);;
+    *) status_colour=;;
   esac
-  printf '%-31s %-10s %s\n' "$label" "$status" "$detail"
+  reset=$(colour 0)
+  printf '%-31s %b%-10s%b %s\n' "$label" "$status_colour" "$status" "$reset" "$detail"
 }
 validation_summary(){
   printf '\n'

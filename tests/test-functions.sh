@@ -33,6 +33,14 @@ OS_PACKAGE_MANAGER=apt
 assert_ok confirm_yes <<< ''
 assert_ok confirm_yes <<< 'yes'
 assert_bad confirm_yes <<< 'n'
+MENU_TEST=
+menu_select MENU_TEST 'Test menu' 2 'First choice' 'Second choice' 'Third choice' <<< ''
+assert_eq "$MENU_TEST" 2
+menu_select MENU_TEST 'Test menu' 1 'First choice' 'Second choice' 'Third choice' <<< '3'
+assert_eq "$MENU_TEST" 3
+selected=
+menu_select selected 'Shadow-safe menu' 1 'First choice' 'Second choice' <<< '2'
+assert_eq "$selected" 2
 assert_ok ip_in_range 10.0.0.10 10.0.0.1 10.0.0.20
 assert_bad ip_in_range 10.0.0.21 10.0.0.1 10.0.0.20
 assert_ok same_subnet 10.10.20.10 10.10.20.13 24
@@ -86,6 +94,7 @@ source "$ROOT/lib/validation.sh"
 report 'Counter test' FAIL >/dev/null
 report 'Counter warning' WARN >/dev/null
 report 'Counter untested' 'NOT TESTED' >/dev/null
+report 'Counter missing' MISSING >/dev/null
 assert_eq "$VALIDATION_FAILURES" 1
 assert_eq "$VALIDATION_WARNINGS" 1
 assert_eq "$VALIDATION_NOT_TESTED" 1

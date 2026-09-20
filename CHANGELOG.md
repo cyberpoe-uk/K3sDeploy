@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add terminal-aware arrow-key menus with Enter/Space confirmation and automatic numbered-prompt fallback for redirected or non-interactive sessions.
+- Extend the K3sDeploy yellow identity colour to section titles and progress panels, with distinct cyan information, green success, orange warning, and red error/failed-check output plus `NO_COLOR` support.
 - End successful menu workflows with an action-specific summary and normal installer exit, while retaining the menu after recoverable failures.
 - Defer the automatic Longhorn smoke-test prompt on a one-storage-node cluster, offer it after manager joins and repairs when multiple storage nodes are ready, and direct worker operators to a manager with administrative access.
 - Record successful Longhorn functional tests in a cluster ConfigMap so later validation reports the last passing test instead of `NOT TESTED`.

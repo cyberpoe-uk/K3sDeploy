@@ -32,15 +32,17 @@ trap cleanup_join_check EXIT
 
 usage(){ cat <<EOF
 K3sDeploy Installer $VERSION
-Usage: ./k3s-bootstrap.sh [--dry-run] [--verbose] [--yes] [--help] [--version]
+Usage: ./k3s-bootstrap.sh [--dry-run] [--verbose] [--yes] [--no-color] [--plain-menu] [--help] [--version]
 
 Interactive modes: create first manager, join manager, join worker, promote worker, validate, safe repair.
 --dry-run  Show intended host changes (cluster queries may still be read-only)
 --verbose  Show commands as they run (secret-bearing commands remain redacted)
 --yes      Accept ordinary confirmations; never bypasses exact disk confirmation
+--no-color Disable terminal colours; interactive arrow-key menus remain enabled
+--plain-menu Use numbered prompts instead of the interactive arrow-key selector
 EOF
 }
-parse_args(){ while (($#)); do case $1 in --dry-run) DRY_RUN=true;; --verbose) VERBOSE=true;; --yes) ASSUME_YES=true;; --help|-h) usage; exit;; --version) echo "$VERSION"; exit;; *) die "Unknown option: $1";; esac; shift; done; }
+parse_args(){ while (($#)); do case $1 in --dry-run) DRY_RUN=true;; --verbose) VERBOSE=true;; --yes) ASSUME_YES=true;; --no-color) NO_COLOR=1; export NO_COLOR;; --plain-menu) K3SDEPLOY_PLAIN_MENU=1; export K3SDEPLOY_PLAIN_MENU;; --help|-h) usage; exit;; --version) echo "$VERSION"; exit;; *) die "Unknown option: $1";; esac; shift; done; }
 use_metallb(){ [[ $LOAD_BALANCER_MODE == metallb ]]; }
 use_servicelb(){ [[ $LOAD_BALANCER_MODE == servicelb ]]; }
 use_longhorn(){ [[ $STORAGE_PROVIDER == longhorn ]]; }
@@ -72,14 +74,12 @@ configure_advanced_profile(){
   local choice
   INSTALL_PROFILE=advanced
   section 'Advanced load-balancer choice'
-  printf '%s\n' \
-    '1. MetalLB (recommended; installed and configured by K3sDeploy)' \
-    '2. K3s ServiceLB (built in; simpler, but not the recommended HA design)' \
-    '3. External or none (you will install and manage it separately)'
   while true; do
-    printf '\n'
-    read -r -p 'Selection [1]: ' choice
-    case ${choice:-1} in
+    menu_select choice 'Choose load-balancer mode' 1 \
+      'MetalLB — recommended and managed by K3sDeploy' \
+      'K3s ServiceLB — built in, but not the recommended HA design' \
+      'External or none — installed and managed separately'
+    case $choice in
       1) LOAD_BALANCER_MODE=metallb; break;;
       2)
         warn 'MetalLB is recommended for the HA, bare-metal-style design used by K3sDeploy.'
@@ -94,15 +94,13 @@ configure_advanced_profile(){
   done
 
   section 'Advanced persistent-storage choice'
-  printf '%s\n' \
-    '1. Longhorn (recommended HA storage; installed and configured by K3sDeploy)' \
-    '2. Shared NFS (guided NFS CSI setup using an existing NFSv4.1 export)' \
-    '3. K3s local-path (NON-HA node-local storage; explicit risk acceptance required)' \
-    '4. Other external or none (K3s local-storage is disabled; you manage it)'
   while true; do
-    printf '\n'
-    read -r -p 'Selection [1]: ' choice
-    case ${choice:-1} in
+    menu_select choice 'Choose persistent-storage mode' 1 \
+      'Longhorn — recommended HA storage managed by K3sDeploy' \
+      'Shared NFS — guided NFS CSI setup using an existing export' \
+      'K3s local-path — NON-HA node-local storage; risk acceptance required' \
+      'Other external or none — storage is managed separately'
+    case $choice in
       1) STORAGE_PROVIDER=longhorn; break;;
       2) STORAGE_PROVIDER=nfs; collect_nfs_config; break;;
       3)
@@ -124,17 +122,15 @@ choose_install_profile(){
   while true; do
     section 'Installation profile'
     printf '%s\n' \
-      '1. Recommended installation' \
-      '   K3sDeploy configures kube-vip, MetalLB, and Longhorn with guided defaults.' \
-      '' \
-      '2. Advanced / custom installation' \
-      '   Choose supported or externally managed load balancing and shared storage.' \
-      '   K3sDeploy only installs components it explicitly lists as supported.' \
-      '' \
-      '3. Exit'
+      '  Recommended uses guided kube-vip, MetalLB, and Longhorn defaults.' \
+      '  Advanced lets you choose supported or externally managed components.' \
+      '  K3sDeploy only installs components it explicitly lists as supported.'
     printf '\n'
-    read -r -p 'Selection [1]: ' choice
-    case ${choice:-1} in
+    menu_select choice 'Choose installation profile' 1 \
+      'Recommended installation' \
+      'Advanced / custom installation' \
+      'Exit'
+    case $choice in
       1) set_recommended_profile; return 0;;
       2) configure_advanced_profile; return 0;;
       3) return 1;;
@@ -501,7 +497,19 @@ promote_agent(){
 configure_updates_prompt(){ if ! security_updates_supported; then skip "Automatic security-update configuration is not changed on $OS_NAME; use its native update policy."; elif confirm 'Enable security-only unattended upgrades (automatic reboot disabled)?'; then configure_updates; else skip 'Unattended upgrades unchanged'; fi; }
 load_state(){ local state_content; if [[ -r $STATE_FILE ]]; then state_content=$(<"$STATE_FILE"); elif sudo -n test -r "$STATE_FILE" 2>/dev/null; then state_content=$(sudo cat "$STATE_FILE"); else return 0; fi; while IFS='=' read -r key value; do case $key in INSTALL_PROFILE|LOAD_BALANCER_MODE|STORAGE_PROVIDER|NODE_ROLE|NODE_IP|API_VIP|POOL_START|POOL_END|STORAGE_MODE|STORAGE_DEVICE|LONGHORN_PATH|LONGHORN_DEVICE_UUID|LONGHORN_REPLICAS|NFS_SERVER|NFS_EXPORT) printf -v "$key" '%s' "$value";; esac; done <<<"$state_content"; }
 show_main_menu(){
-  printf '\nK3sDeploy Installer %s\nProfile: %s | Load balancer: %s | Storage: %s\n\n1. Create new K3s cluster (Node 1 manager setup)\n2. Join existing K3s cluster as a manager node (control-plane + etcd)\n3. Join K3s cluster as a worker node\n4. Upgrade K3s cluster worker node to manager (control-plane + etcd)\n5. Validate this node and cluster\n6. Repair safe local differences\n7. Exit\n\nFor most clusters use 3 or 5 manager nodes; join remaining machines as workers.\n' "$VERSION" "$INSTALL_PROFILE" "$LOAD_BALANCER_MODE" "$STORAGE_PROVIDER"
+  local variable=$1 default=1
+  [[ ${K3S_INSTALLED:-no} == yes ]] && default=5
+  section "K3sDeploy Installer $VERSION"
+  printf '  Profile: %s | Load balancer: %s | Storage: %s\n' "$INSTALL_PROFILE" "$LOAD_BALANCER_MODE" "$STORAGE_PROVIDER"
+  printf '  For most clusters, use 3 or 5 managers and join the remaining machines as workers.\n\n'
+  menu_select "$variable" 'Choose an installer action' "$default" \
+    'Create new K3s cluster — first manager' \
+    'Join existing cluster — manager with control-plane + etcd' \
+    'Join existing cluster — worker' \
+    'Upgrade this worker to manager — control-plane + etcd' \
+    'Validate this node and cluster — read only' \
+    'Repair safe local differences — asks before changes' \
+    'Exit'
 }
 workflow_completion_summary(){
   local action=$1
@@ -603,8 +611,7 @@ main(){
     preflight_collect
     basic_host_sanity
     announce_existing_k3s
-    show_main_menu
-    read -r -p 'Selection: ' action
+    show_main_menu action
     [[ $action == 7 ]] && return 0
     if [[ ! $action =~ ^[1-6]$ ]]; then warn 'Invalid selection; choose a number from 1 to 7.'; continue; fi
     run_menu_action "$action"

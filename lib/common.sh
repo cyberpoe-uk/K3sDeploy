@@ -78,13 +78,68 @@ package_for(){
   esac
 }
 
-colour() { [[ -t 1 ]] && printf '\033[%sm' "$1" || true; }
+terminal_colours(){ [[ -t 1 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; }
+interactive_terminal(){ [[ -t 0 && -t 1 && ${TERM:-dumb} != dumb && ${K3SDEPLOY_PLAIN_MENU:-0} != 1 ]]; }
+colour() { terminal_colours && printf '\033[%sm' "$1" || true; }
 log() { local level=$1 colour_code=$2; shift 2; printf '%s[%s] %-6s%s %s\n' "$(colour "$colour_code")" "$(date '+%F %T')" "$level" "$(colour 0)" "$*"; [[ -w ${LOG_FILE%/*} ]] && printf '[%s] %-6s %s\n' "$(date '+%F %T')" "$level" "$*" >>"$LOG_FILE" || true; }
-info(){ log INFO 36 "$*"; }; ok(){ log OK 32 "$*"; }; warn(){ log WARN 33 "$*"; }; error(){ log ERROR 31 "$*"; }; skip(){ log SKIP 34 "$*"; }; change(){ log CHANGE 35 "$*"; }
-section(){ local title=$1 rule; printf -v rule '%*s' "${#title}" ''; printf '\n%s\n%s\n\n' "$title" "${rule// /-}"; }
+info(){ log INFO 96 "$*"; }; ok(){ log OK 92 "$*"; }; warn(){ log WARN '38;5;208' "$*"; }; error(){ log ERROR '1;91' "$*"; }; skip(){ log SKIP 94 "$*"; }; change(){ log CHANGE 95 "$*"; }
+section(){ local title=$1 rule yellow reset; printf -v rule '%*s' "${#title}" ''; yellow=$(colour '1;33'); reset=$(colour 0); printf '\n%b%s\n%s%b\n\n' "$yellow" "$title" "${rule// /-}" "$reset"; }
+render_menu_options(){
+  local selected=$1; shift
+  local index=1 option display yellow reset max_width=$(( ${COLUMNS:-80} - 10 ))
+  ((max_width < 30)) && max_width=30
+  yellow=$(colour '1;33'); reset=$(colour 0)
+  for option in "$@"; do
+    display=$option
+    ((${#display} > max_width)) && display="${display:0:max_width-1}…"
+    printf '\033[2K\r'
+    if ((index == selected)); then
+      printf '%b  ❯ %d. %s%b\n' "$yellow" "$index" "$display" "$reset"
+    else
+      printf '    %d. %s\n' "$index" "$display"
+    fi
+    index=$((index+1))
+  done
+}
+menu_select(){
+  local _menu_target=$1 _menu_prompt=$2 _menu_default=$3; shift 3
+  local -a _menu_options=("$@")
+  local _menu_selected=$_menu_default _menu_key _menu_rest= _menu_count=${#_menu_options[@]} _menu_index
+  ((_menu_count > 0)) || return 1
+  if ! interactive_terminal; then
+    for ((_menu_index=0; _menu_index<_menu_count; _menu_index++)); do printf '  %d. %s\n' "$((_menu_index+1))" "${_menu_options[_menu_index]}"; done
+    printf '\n'
+    read -r -p "$_menu_prompt [$_menu_default]: " _menu_selected
+    _menu_selected=${_menu_selected:-$_menu_default}
+    printf -v "$_menu_target" '%s' "$_menu_selected"
+    return 0
+  fi
+
+  printf '%s\n\n' '  Use ↑/↓ (or j/k) to move. Press Enter or Space to select.'
+  render_menu_options "$_menu_selected" "${_menu_options[@]}"
+  while true; do
+    IFS= read -rsn1 _menu_key || return 1
+    if [[ $_menu_key == $'\033' ]]; then
+      IFS= read -rsn2 -t 0.2 _menu_rest || true
+      _menu_key+=$_menu_rest
+    fi
+    case $_menu_key in
+      $'\033[A'|k|K) ((_menu_selected > 1)) && _menu_selected=$((_menu_selected-1));;
+      $'\033[B'|j|J) ((_menu_selected < _menu_count)) && _menu_selected=$((_menu_selected+1));;
+      '') break;;
+      ' ') break;;
+      [1-9]) ((_menu_key <= _menu_count)) && _menu_selected=$_menu_key;;
+      *) continue;;
+    esac
+    printf '\033[%dA' "$_menu_count"
+    render_menu_options "$_menu_selected" "${_menu_options[@]}"
+  done
+  printf -v "$_menu_target" '%s' "$_menu_selected"
+  printf '\n'
+}
 show_banner(){
   local yellow= reset=
-  if [[ -t 1 ]]; then yellow='\033[0;33m'; reset='\033[0m'; fi
+  yellow=$(colour '1;33'); reset=$(colour 0)
   printf '%b' "$yellow"
   cat <<'EOF'
  _  __ _____      ____             _
@@ -111,14 +166,15 @@ require_privileges(){
   ensure_log
 }
 phase(){
-  local current=$1 total=$2 title=$3 width=24 filled empty bar empty_bar
+  local current=$1 total=$2 title=$3 width=24 filled empty bar empty_bar yellow reset
   filled=$((current*width/total)); empty=$((width-filled))
   printf -v bar '%*s' "$filled" ''; bar=${bar// /#}
   printf -v empty_bar '%*s' "$empty" ''; bar+="${empty_bar// /-}"
-  printf '\n+----------------------------------------------------------+\n'
+  yellow=$(colour '1;33'); reset=$(colour 0)
+  printf '\n%b+----------------------------------------------------------+\n' "$yellow"
   printf '| K3sDeploy %-14s[%s] %2d/%-2d |\n' "$VERSION" "$bar" "$current" "$total"
   printf '| %-56s |\n' "$title"
-  printf '+----------------------------------------------------------+\n'
+  printf '+----------------------------------------------------------+%b\n' "$reset"
 }
 short_hostname(){
   local name
