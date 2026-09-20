@@ -61,7 +61,7 @@ for response in 'n' 'invalid'; do
     if [[ $status -eq 0 ]]; then
         printf 'FAIL expected declined Git installation to return non-zero\n'
         ((++fail))
-    elif [[ "$output" == *'Launcher cancelled; Git was not installed.'* &&
+    elif [[ "$output" == *'Launcher cancelled. Git was not installed.'* &&
         "$output" != *'UNEXPECTED_PRIVILEGED_OPERATION'* ]]; then
         ((++pass))
     else

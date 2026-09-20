@@ -7,4 +7,4 @@ configure_updates(){ security_updates_supported || { warn "Automatic security-up
 APT::Periodic::Unattended-Upgrade "1";
 Unattended-Upgrade::Automatic-Reboot "false";
 Unattended-Upgrade::Allowed-Origins { "${distro_id}:${distro_codename}-security"; };
-'; write_root_file /etc/apt/apt.conf.d/52k3s-bootstrap-security 644 "$cfg" || true; ok "Security-only unattended upgrades enabled; automatic reboot disabled"; }
+'; write_root_file /etc/apt/apt.conf.d/52k3s-bootstrap-security 644 "$cfg" || true; ok "Security-only unattended upgrades enabled. Automatic reboot disabled"; }

@@ -41,7 +41,7 @@ install_k3s(){ local cfg=$1 role=${2:-server} service=k3s changed=false; [[ $rol
     chmod 700 "$installer"
     as_root env INSTALL_K3S_VERSION="$K3S_VERSION" INSTALL_K3S_EXEC="$role" sh "$installer"
     rm -f "$installer"
-  elif $changed; then as_root systemctl restart "$service"; else skip "K3s already installed; no reinstall/restart"; fi
+  elif $changed; then as_root systemctl restart "$service"; else skip "K3s already installed. No reinstall/restart"; fi
 }
 wait_k3s(){ $DRY_RUN && return; local end=$((SECONDS+300)); until as_root k3s kubectl get --raw=/readyz >/dev/null 2>&1; do ((SECONDS<end)) || die "K3s API did not become ready within 300s"; sleep 5; done; ok "K3s API is ready"; }
 wait_local_node(){ $DRY_RUN && return; local node=${DESIRED_HOSTNAME:-$(short_hostname)} end=$((SECONDS+600)); until as_root k3s kubectl get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -qx True; do ((SECONDS<end)) || die "Node $node did not become Ready within 600s"; sleep 5; done; local labels; labels=$(as_root k3s kubectl get node "$node" --show-labels --no-headers); grep -q 'node-role.kubernetes.io/control-plane' <<<"$labels" || die "Node lacks control-plane role"; grep -q 'node-role.kubernetes.io/etcd' <<<"$labels" || die "Node lacks etcd role"; ok "Node is Ready with control-plane and etcd roles"; }

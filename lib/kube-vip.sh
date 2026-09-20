@@ -73,7 +73,7 @@ wait_kube_vip(){
     fi
     sleep 3
   done
-  info 'The current kube-vip template is applied; waiting up to five minutes for all manager pods to become ready.'
+  info 'The current kube-vip template is applied. Waiting up to five minutes for all manager pods to become ready.'
   while ((SECONDS < end)); do
     if kube_vip_ready; then
       ok "kube-vip is ready ($(kube_vip_status))"

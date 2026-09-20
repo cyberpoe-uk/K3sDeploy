@@ -86,6 +86,9 @@ terminal_colours(){
 }
 interactive_terminal(){ [[ -t 0 && -t 1 && ${TERM:-dumb} != dumb && ${K3SDEPLOY_PLAIN_MENU:-0} != 1 ]]; }
 colour() { terminal_colours && printf '\033[%sm' "$1" || true; }
+readonly MENU_DISABLED_PREFIX='__K3SDEPLOY_DISABLED__'
+menu_option_disabled(){ [[ $1 == "$MENU_DISABLED_PREFIX"* ]]; }
+menu_option_label(){ printf '%s' "${1#"$MENU_DISABLED_PREFIX"}"; }
 explain_colour_mode(){
   if [[ $K3SDEPLOY_STDOUT_IS_TTY == true && ${TERM:-dumb} != dumb && -n ${NO_COLOR:-} && $K3SDEPLOY_FORCE_COLOR != true ]]; then
     printf '%s\n' '[K3SDEPLOY] Colours are disabled because NO_COLOR is set. Run with --color to override it for this session.'
@@ -96,14 +99,18 @@ info(){ log INFO 96 "$*"; }; ok(){ log OK 92 "$*"; }; warn(){ log WARN '38;5;208
 section(){ local title=$1 rule yellow reset; printf -v rule '%*s' "${#title}" ''; yellow=$(colour '1;33'); reset=$(colour 0); printf '\n%b%s\n%s%b\n\n' "$yellow" "$title" "${rule// /-}" "$reset"; }
 render_menu_options(){
   local selected=$1; shift
-  local index=1 option display yellow reset max_width=$(( ${COLUMNS:-80} - 10 ))
+  local index=1 option display yellow grey reset max_width=$(( ${COLUMNS:-80} - 10 ))
   ((max_width < 30)) && max_width=30
-  yellow=$(colour '1;33'); reset=$(colour 0)
+  yellow=$(colour '1;33')
+  grey=$(colour 90)
+  reset=$(colour 0)
   for option in "$@"; do
-    display=$option
+    display=$(menu_option_label "$option")
     ((${#display} > max_width)) && display="${display:0:max_width-1}…"
     printf '\033[2K\r'
-    if ((index == selected)); then
+    if menu_option_disabled "$option"; then
+      printf '%b    %d. %s%b\n' "$grey" "$index" "$display" "$reset"
+    elif ((index == selected)); then
       printf '%b  ❯ %d. %s%b\n' "$yellow" "$index" "$display" "$reset"
     else
       printf '    %d. %s\n' "$index" "$display"
@@ -114,13 +121,36 @@ render_menu_options(){
 menu_select(){
   local _menu_target=$1 _menu_prompt=$2 _menu_default=$3; shift 3
   local -a _menu_options=("$@")
-  local _menu_selected=$_menu_default _menu_key _menu_rest= _menu_count=${#_menu_options[@]} _menu_index
+  local _menu_selected=$_menu_default _menu_key _menu_rest= _menu_count=${#_menu_options[@]} _menu_index _menu_candidate
   ((_menu_count > 0)) || return 1
+  if ((_menu_selected < 1 || _menu_selected > _menu_count)) || menu_option_disabled "${_menu_options[_menu_selected-1]}"; then
+    _menu_selected=0
+    for ((_menu_index=0; _menu_index<_menu_count; _menu_index++)); do
+      if ! menu_option_disabled "${_menu_options[_menu_index]}"; then
+        _menu_selected=$((_menu_index+1))
+        break
+      fi
+    done
+    ((_menu_selected > 0)) || return 1
+  fi
   if ! interactive_terminal; then
-    for ((_menu_index=0; _menu_index<_menu_count; _menu_index++)); do printf '  %d. %s\n' "$((_menu_index+1))" "${_menu_options[_menu_index]}"; done
+    for ((_menu_index=0; _menu_index<_menu_count; _menu_index++)); do
+      printf '  %d. %s\n' "$((_menu_index+1))" "$(menu_option_label "${_menu_options[_menu_index]}")"
+    done
     printf '\n'
-    read -r -p "$_menu_prompt [$_menu_default]: " _menu_selected
-    _menu_selected=${_menu_selected:-$_menu_default}
+    while true; do
+      read -r -p "$_menu_prompt [$_menu_selected]: " _menu_candidate || return 1
+      _menu_candidate=${_menu_candidate:-$_menu_selected}
+      if [[ $_menu_candidate =~ ^[1-9][0-9]*$ ]] && ((_menu_candidate >= 1 && _menu_candidate <= _menu_count)); then
+        if menu_option_disabled "${_menu_options[_menu_candidate-1]}"; then
+          warn 'That option is unavailable. Choose one of the enabled options.'
+          continue
+        fi
+        _menu_selected=$_menu_candidate
+        break
+      fi
+      warn "Choose a number from 1 to $_menu_count."
+    done
     printf -v "$_menu_target" '%s' "$_menu_selected"
     return 0
   fi
@@ -134,11 +164,25 @@ menu_select(){
       _menu_key+=$_menu_rest
     fi
     case $_menu_key in
-      $'\033[A'|k|K) ((_menu_selected > 1)) && _menu_selected=$((_menu_selected-1));;
-      $'\033[B'|j|J) ((_menu_selected < _menu_count)) && _menu_selected=$((_menu_selected+1));;
+      $'\033[A'|k|K)
+        _menu_candidate=$((_menu_selected-1))
+        while ((_menu_candidate >= 1)); do
+          if ! menu_option_disabled "${_menu_options[_menu_candidate-1]}"; then _menu_selected=$_menu_candidate; break; fi
+          _menu_candidate=$((_menu_candidate-1))
+        done
+        ;;
+      $'\033[B'|j|J)
+        _menu_candidate=$((_menu_selected+1))
+        while ((_menu_candidate <= _menu_count)); do
+          if ! menu_option_disabled "${_menu_options[_menu_candidate-1]}"; then _menu_selected=$_menu_candidate; break; fi
+          _menu_candidate=$((_menu_candidate+1))
+        done
+        ;;
       '') break;;
       ' ') break;;
-      [1-9]) ((_menu_key <= _menu_count)) && _menu_selected=$_menu_key;;
+      [1-9])
+        if ((_menu_key <= _menu_count)) && ! menu_option_disabled "${_menu_options[_menu_key-1]}"; then _menu_selected=$_menu_key; fi
+        ;;
       *) continue;;
     esac
     printf '\033[%dA' "$_menu_count"
@@ -168,10 +212,10 @@ confirm(){ local prompt=${1:-Proceed?}; $ASSUME_YES && return 0; read -r -p "$pr
 confirm_yes(){ local prompt=${1:-Continue?}; $ASSUME_YES && return 0; read -r -p "$prompt [Y/n] " reply; [[ -z $reply || $reply =~ ^[Yy]([Ee][Ss])?$ ]]; }
 need_cmd(){ command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
 require_privileges(){
-  [[ $EUID -eq 0 ]] && { info "Running as root; no sudo authentication is needed"; ensure_log; return; }
+  [[ $EUID -eq 0 ]] && { info "Running as root. No sudo authentication is needed"; ensure_log; return; }
   need_cmd sudo
   info "Administrator access is required for system packages, services and protected configuration."
-  info "The main installer remains your normal user; sudo is used only for privileged operations."
+  info "The main installer remains your normal user. sudo is used only for privileged operations."
   sudo -v || die "Could not obtain sudo access"
   ensure_log
 }
@@ -214,7 +258,7 @@ prompt_required(){
   while true; do
     read -r -p "$prompt: " value
     [[ -n $value ]] && break
-    warn "$prompt cannot be empty; please try again."
+    warn "$prompt cannot be empty. Please try again."
   done
   printf -v "$var" '%s' "$value"
 }

@@ -47,7 +47,7 @@ EOF
     warn "Longhorn V1 recommends at least $MIN_RECOMMENDED_CPU CPUs and $MIN_RECOMMENDED_RAM_GIB GiB RAM per storage node."
     confirm "Continue with this smaller machine anyway?" || die "Hardware prerequisite confirmation declined"
   fi
-  getent hosts github.com >/dev/null 2>&1 || warn "DNS/internet check failed; installation downloads will fail"
+  getent hosts github.com >/dev/null 2>&1 || warn "DNS/internet check failed. Installation downloads will fail"
   curl -fsI --max-time 5 https://get.k3s.io >/dev/null 2>&1 || warn "HTTPS connectivity to get.k3s.io could not be confirmed"
   [[ $TIME_SYNC == yes ]] || warn "System clock is not confirmed synchronized"
   [[ $SWAP_STATUS == disabled ]] || warn "Swap is enabled. Monitor memory pressure and confirm your Kubernetes swap policy before production use."
@@ -68,7 +68,7 @@ announce_existing_k3s(){
 detect_existing(){
   export LONGHORN_DATA_PRESENT=no
   [[ -f $CONFIG_FILE ]] && warn "Existing K3s configuration detected: $CONFIG_FILE"
-  if [[ -d /var/lib/longhorn ]] && [[ -n $(as_root_capture find /var/lib/longhorn -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) ]]; then LONGHORN_DATA_PRESENT=yes; warn "Existing Longhorn data detected; it will not be removed"; fi
+  if [[ -d /var/lib/longhorn ]] && [[ -n $(as_root_capture find /var/lib/longhorn -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) ]]; then LONGHORN_DATA_PRESENT=yes; warn "Existing Longhorn data detected. It will not be removed"; fi
   findmnt -rn /var/lib/longhorn >/dev/null 2>&1 && info "Existing Longhorn mount: $(findmnt -rn -o SOURCE,FSTYPE,TARGET /var/lib/longhorn)"
   return 0
 }

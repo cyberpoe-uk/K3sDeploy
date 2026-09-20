@@ -82,7 +82,7 @@ data:
   testedAt: "$tested_at"
   testedFromNode: "$node"
   installerVersion: "$VERSION"
-  scope: "single-volume provisioning, attachment, reattachment, and persistence; not an HA failover test"
+  scope: "single-volume provisioning, attachment, reattachment, and persistence, not an HA failover test"
 EOF
 )
   printf '%s' "$manifest" | kubectl_local apply -f -
@@ -90,7 +90,7 @@ EOF
 
 cleanup_longhorn_smoke(){
   local namespace=$1 storage_class=$2
-  kubectl_local delete namespace "$namespace" --ignore-not-found --wait=true --timeout=120s >/dev/null 2>&1 || warn "Smoke-test namespace $namespace is still terminating; Kubernetes will continue cleaning it up."
+  kubectl_local delete namespace "$namespace" --ignore-not-found --wait=true --timeout=120s >/dev/null 2>&1 || warn "Smoke-test namespace $namespace is still terminating. Kubernetes will continue cleaning it up."
   kubectl_local delete storageclass "$storage_class" --ignore-not-found >/dev/null 2>&1 || warn "Remove temporary StorageClass $storage_class manually."
 }
 
@@ -101,7 +101,7 @@ run_longhorn_smoke(){
   storage_class="k3sdeploy-longhorn-smoke-$suffix"
   token="k3sdeploy-$suffix"
   info 'This temporary test creates a 128 MiB one-replica volume, writes unique data, reattaches it to another pod, verifies the data, and removes all test resources.'
-  info 'It verifies provisioning and persistence on this node; it does not prove three-node replica availability or replace backups.'
+  info 'It verifies provisioning and persistence on this node. It does not prove three-node replica availability or replace backups.'
   manifest=$(cat <<EOF
 apiVersion: v1
 kind: Namespace

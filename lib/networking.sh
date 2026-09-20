@@ -22,7 +22,7 @@ vip_conflict_check(){
       warn "The ARP ownership check failed unexpectedly (exit $rc)."
     fi
   else
-    warn 'arping unavailable; the primary Layer-2 ownership check could not run.'
+    warn 'arping unavailable. The primary Layer-2 ownership check could not run.'
   fi
   if command -v ping >/dev/null 2>&1 && ping -n -c 1 -W 1 "$vip" >/dev/null 2>&1; then
     VIP_CHECK_RESULT=occupied

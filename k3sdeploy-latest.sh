@@ -89,10 +89,10 @@ ensure_git_dependency() {
 
     info "Git is needed to download the latest tagged K3sDeploy release."
     info "With your approval, ${OS_NAME} will install Git before the K3sDeploy menu opens."
-    info "sudo may request your password; the launcher itself continues as your normal user."
+    info "sudo may request your password. The launcher itself continues as your normal user."
     if ! read -rp "Install Git and continue? [Y/n]: " answer ||
         [[ -n "$answer" && ! "$answer" =~ ^([Yy]|[Yy][Ee][Ss])$ ]]; then
-        info "Launcher cancelled; Git was not installed."
+        info "Launcher cancelled. Git was not installed."
         return 1
     fi
 

@@ -32,7 +32,7 @@ validation_summary(){
     return 1
   fi
   if ((VALIDATION_WARNINGS > 0 || VALIDATION_NOT_TESTED > 0)); then
-    warn "Health result: no failed checks; $VALIDATION_WARNINGS warning(s) and $VALIDATION_NOT_TESTED untested check(s) need review."
+    warn "Health result: no failed checks, $VALIDATION_WARNINGS warning(s) and $VALIDATION_NOT_TESTED untested check(s) need review."
     return 0
   fi
   ok 'Health result: all applicable checks passed'
@@ -57,7 +57,7 @@ report_fresh_node(){
   if [[ ${STORAGE_PROVIDER:-longhorn} != longhorn ]]; then
     report open-iscsi SKIP 'Longhorn not selected'
   elif command -v iscsiadm >/dev/null 2>&1; then
-    if systemctl is-active --quiet iscsid; then report open-iscsi OK; else report open-iscsi WARN 'installed but inactive; K3sDeploy will configure it during installation'; fi
+    if systemctl is-active --quiet iscsid; then report open-iscsi OK; else report open-iscsi WARN 'installed but inactive. K3sDeploy will configure it during installation'; fi
   else
     report open-iscsi MISSING 'installed automatically when Longhorn is deployed'
   fi
@@ -65,11 +65,11 @@ report_fresh_node(){
     report 'Longhorn storage' MISSING 'not configured'
     report 'Persistent storage' 'NOT TESTED' 'install the cluster before running the smoke test'
   elif [[ ${STORAGE_PROVIDER:-longhorn} == local-path ]]; then
-    report 'Persistent storage' MISSING 'K3s local-path requires K3s; it is non-HA node-local storage'
+    report 'Persistent storage' MISSING 'K3s local-path requires K3s. It is non-HA node-local storage'
   elif [[ ${STORAGE_PROVIDER:-longhorn} == nfs ]]; then
     report 'Persistent storage' MISSING 'NFS CSI requires K3s installation'
   else
-    report 'Persistent storage' SKIP 'externally managed; validate it with its own tooling'
+    report 'Persistent storage' SKIP 'externally managed, validate it with its own tooling'
   fi
 }
 
@@ -117,7 +117,7 @@ validate_cluster(){
     if [[ ${STORAGE_PROVIDER:-longhorn} == longhorn ]]; then validate_longhorn || true; else report Longhorn SKIP "$STORAGE_PROVIDER storage selected"; fi
     if [[ ${STORAGE_PROVIDER:-longhorn} != local-path ]]; then
       if kubectl_local -n kube-system get deploy local-path-provisioner >/dev/null 2>&1; then
-        report 'K3s local-path' WARN 'present although it is not selected; do not use it for HA workloads'
+        report 'K3s local-path' WARN 'present although it is not selected. Do not use it for HA workloads'
       else
         report 'K3s local-path' OK 'disabled as planned'
       fi
@@ -136,7 +136,7 @@ validate_cluster(){
     validate_nfs || true
   elif [[ ${STORAGE_PROVIDER:-longhorn} != longhorn ]]; then
     report open-iscsi SKIP 'Longhorn not selected'
-    report 'Persistent storage' SKIP 'externally managed; validate it with its own tooling'
+    report 'Persistent storage' SKIP 'externally managed, validate it with its own tooling'
   else
     if ! command -v iscsiadm >/dev/null 2>&1; then report open-iscsi MISSING 'package is not installed'; elif systemctl is-active --quiet iscsid; then report open-iscsi OK; else report open-iscsi FAIL 'installed service is inactive'; fi
     validate_storage_selection || true
@@ -155,7 +155,7 @@ validate_cluster(){
 repair_managed_addons(){
   [[ ${NODE_ROLE:-server} != agent ]] || return 0
   if ! kubectl_local get --raw=/readyz >/dev/null 2>&1; then
-    warn 'The Kubernetes API is not ready; cluster add-ons cannot be reconciled yet.'
+    warn 'The Kubernetes API is not ready. Cluster add-ons cannot be reconciled yet.'
     return 0
   fi
 
@@ -247,12 +247,12 @@ offer_longhorn_smoke(){
       return 1
     fi
   else
-    skip 'Longhorn functional smoke test was not requested; configuration checks only were completed'
+    skip 'Longhorn functional smoke test was not requested. Configuration checks only were completed'
   fi
 }
 verify_after_repair(){
   validate_cluster
-  info 'The health report above is the same read-only inspection provided by menu option 5; you do not need to run it again now.'
+  info 'The health report above is the same read-only inspection provided by menu option 5. You do not need to run it again now.'
   if ((VALIDATION_FAILURES > 0)); then
     warn 'Repair completed, but failed health checks remain. Resolve the reported failure before deploying workloads.'
     return 0
@@ -272,7 +272,7 @@ safe_repair(){
   if [[ -n $service ]]; then
     systemctl is-active --quiet "$service" 2>/dev/null || { confirm_yes "Start inactive $service service?" && as_root systemctl start "$service"; }
   else
-    warn 'K3s files were detected, but no k3s or k3s-agent service unit exists. Automatic repair is not safe; review the installation log or reinstall deliberately.'
+    warn 'K3s files were detected, but no k3s or k3s-agent service unit exists. Automatic repair is not safe. Review the installation log or reinstall deliberately.'
     validate_cluster
     return 0
   fi
@@ -283,6 +283,6 @@ safe_repair(){
     ensure_nfs_client
   fi
   repair_managed_addons
-  [[ ! -f $CONFIG_FILE ]] || warn "Configuration reconciliation requires desired values and explicit confirmation; no automatic cluster-identity changes are made."
+  [[ ! -f $CONFIG_FILE ]] || warn "Configuration reconciliation requires desired values and explicit confirmation. No automatic cluster-identity changes are made."
   verify_after_repair
 }

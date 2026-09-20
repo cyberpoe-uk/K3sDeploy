@@ -17,7 +17,7 @@ apply_metallb_config(){
       printf '%s\n' "$output"
       return 0
     fi
-    warn "MetalLB webhook rejected the configuration while starting (attempt $attempt/12); retrying in 5 seconds."
+    warn "MetalLB webhook rejected the configuration while starting (attempt $attempt/12). Retrying in 5 seconds."
     sleep 5
   done
   error "$output"
@@ -42,9 +42,9 @@ validate_metallb(){
   if [[ $controller =~ ^[1-9][0-9]*$ && $speaker_desired =~ ^[1-9][0-9]*$ && $speaker_desired == "$speaker_ready" ]] &&
      kubectl_local -n metallb-system get ipaddresspool homelab-pool >/dev/null 2>&1 &&
      kubectl_local -n metallb-system get l2advertisement homelab-l2 >/dev/null 2>&1; then
-    report MetalLB OK "controller available: $controller; speakers ready: $speaker_ready/$speaker_desired; address pool configured"
+    report MetalLB OK "controller available: $controller, speakers ready: $speaker_ready/$speaker_desired, address pool configured"
   else
-    report MetalLB FAIL "controller available: ${controller:-0}; speakers ready: ${speaker_ready:-0}/${speaker_desired:-0}; verify address pool and advertisement"
+    report MetalLB FAIL "controller available: ${controller:-0}, speakers ready: ${speaker_ready:-0}/${speaker_desired:-0}, verify address pool and advertisement"
     return 1
   fi
 }

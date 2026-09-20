@@ -20,19 +20,19 @@ verify_nfs_share(){
   test_mount=$(mktemp -d -t k3sdeploy-nfs-check-XXXXXX)
   if ! as_root mount -t nfs -o rw,nosuid,nodev,noexec,nfsvers=4.1 "$NFS_SERVER:$NFS_EXPORT" "$test_mount"; then
     if findmnt -rn --target "$test_mount" >/dev/null 2>&1; then
-      as_root umount "$test_mount" || warn "The failed NFS check left $test_mount mounted; unmount it manually."
+      as_root umount "$test_mount" || warn "The failed NFS check left $test_mount mounted. Unmount it manually."
     fi
     rmdir "$test_mount" 2>/dev/null || true
     die "Could not mount $NFS_SERVER:$NFS_EXPORT using NFSv4.1. Check the export, permissions, firewall, and server availability."
   fi
   write_probe="$test_mount/.k3sdeploy-write-test-$$-$RANDOM"
   if ! as_root mkdir "$write_probe"; then
-    as_root umount "$test_mount" || warn "The NFS check left $test_mount mounted; unmount it manually."
+    as_root umount "$test_mount" || warn "The NFS check left $test_mount mounted. Unmount it manually."
     rmdir "$test_mount" 2>/dev/null || true
     die "The NFS export mounted but did not allow directory creation. Grant the CSI provisioner write access to $NFS_EXPORT, then retry."
   fi
   if ! as_root rmdir "$write_probe"; then
-    warn "The NFS write probe $write_probe could not be removed; remove it from the server manually."
+    warn "The NFS write probe $write_probe could not be removed. Remove it from the server manually."
     as_root umount "$test_mount" || true
     rmdir "$test_mount" 2>/dev/null || true
     die 'The NFS write-access check could not clean up safely.'

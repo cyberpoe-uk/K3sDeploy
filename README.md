@@ -15,7 +15,7 @@ The project favors visible checks and explicit confirmation over unattended dest
 | Longhorn | `v1.12.1` | Recommended-profile replicated persistent storage using the V1 filesystem engine |
 | NFS CSI driver | `v4.13.4` | Optional shared NFS storage using an existing NFSv4.1 server/export |
 
-Versions are pinned in `config/versions.env`; installations never follow a moving `latest` tag. The recommended profile disables K3s ServiceLB because MetalLB owns application load-balancer addresses, and disables K3s local-path because Longhorn owns persistent storage. Local-path is enabled only when an advanced-profile user explicitly accepts its non-HA risk. The advanced profile can retain either built-in component or leave that responsibility to an external system. kube-vip is used only for the Kubernetes API.
+Versions are pinned in `config/versions.env`. Installations never follow a moving `latest` tag. The recommended profile disables K3s ServiceLB because MetalLB owns application load-balancer addresses, and disables K3s local-path because Longhorn owns persistent storage. Local-path is enabled only when an advanced-profile user explicitly accepts its non-HA risk. The advanced profile can retain either built-in component or leave that responsibility to an external system. kube-vip is used only for the Kubernetes API.
 
 > MetalLB v0.16.1 matches the validated platform, but its released images have a reported fixable gRPC vulnerability as of September 2026. Review upstream security releases and test any pin change before production use.
 
@@ -25,7 +25,7 @@ Prepare every node before running the installer.
 
 ### Operating system and access
 
-- A systemd-based Linux distribution using `apt`, `dnf`, `yum`, or `zypper`. Ubuntu Server 24.04 LTS is the primary tested target; verify a non-Ubuntu distribution in a disposable node before production use.
+- A systemd-based Linux distribution using `apt`, `dnf`, `yum`, or `zypper`. Ubuntu Server 24.04 LTS is the primary tested target. Verify a non-Ubuntu distribution in a disposable node before production use.
 - `amd64`/`x86_64` or `arm64`/`aarch64` CPU architecture.
 - A normal user account with `sudo` access.
 - A unique lowercase hostname for every node.
@@ -69,7 +69,7 @@ Allow the required traffic between nodes. Important defaults include TCP `6443` 
 
 ## Recommended cluster layout
 
-Use an odd number of manager nodes. Three managers is appropriate for most small and medium installations; five may be useful across additional failure domains. Do not turn all machines in a 20–30 node cluster into etcd voters.
+Use an odd number of manager nodes. Three managers is appropriate for most small and medium installations. Five may be useful across additional failure domains. Do not turn all machines in a 20–30 node cluster into etcd voters.
 
 Example ten-node layout:
 
@@ -156,7 +156,7 @@ The short URL works only after the website endpoint and at least one matching Gi
 
 ### Already downloaded
 
-If you downloaded a release archive instead of using Git, extract the complete archive first. K3sDeploy is a multi-file project; downloading only `k3s-bootstrap.sh` will not work.
+If you downloaded a release archive instead of using Git, extract the complete archive first. K3sDeploy is a multi-file project. Downloading only `k3s-bootstrap.sh` will not work.
 
 ```bash
 cd K3sDeploy-0.1.0
@@ -167,19 +167,21 @@ cd K3sDeploy-0.1.0
 
 K3sDeploy starts with its yellow identity banner and asks for an installation profile before displaying the node-action menu:
 
-When stdin and stdout are attached to an interactive terminal, menus use an arrow-key selector. Move with Up/Down or `j`/`k`, then confirm with Enter or Space. Number keys also move directly to the matching item. Redirected input, basic terminals, and automated runs receive ordinary numbered prompts instead; use `--plain-menu` to request those prompts explicitly for screen readers or terminal compatibility. Titles and progress panels use the K3sDeploy yellow identity colour; informational, successful, warning, and error messages use distinct terminal colours. Set the conventional `NO_COLOR=1` environment variable or use `--no-color` to disable colour without disabling interactive menus. If your shell already exports `NO_COLOR`, K3sDeploy explains why its output is plain; use `--color` to override that variable for one run.
+When stdin and stdout are attached to an interactive terminal, menus use an arrow-key selector. Move with Up/Down or `j`/`k`, then confirm with Enter or Space. Number keys also move directly to the matching item. Redirected input, basic terminals, and automated runs receive ordinary numbered prompts instead. Use `--plain-menu` to request those prompts explicitly for screen readers or terminal compatibility. Titles and progress panels use the K3sDeploy yellow identity colour. Informational, successful, warning, and error messages use distinct terminal colours. Set the conventional `NO_COLOR=1` environment variable or use `--no-color` to disable colour without disabling interactive menus. If your shell already exports `NO_COLOR`, K3sDeploy explains why its output is plain. Use `--color` to override that variable for one run.
+
+Unavailable choices remain visible so the reason is clear, but they are grey and cannot be selected. Arrow navigation skips them, and numbered-prompt mode asks again if an unavailable number is entered.
 
 - **Recommended installation:** the guided path used throughout this README. K3sDeploy configures kube-vip, MetalLB, and Longhorn.
 - **Advanced/custom installation:** MetalLB remains the recommended load balancer, but K3s ServiceLB or an externally managed system can be selected. Storage choices are Longhorn, guided shared NFS, explicitly accepted non-HA local-path, or another externally managed system.
 
-“External” means K3sDeploy deliberately leaves that component uninstalled. For Longhorn, NFS, or external storage, it disables K3s local-storage so an unintended node-local StorageClass does not compete with the selected provider. The local-path choice retains K3s's simple node-local provisioner, displays a data-loss warning, and requires the exact confirmation `ACCEPT-NON-HA-STORAGE`; it does not provide replication or failover. K3sDeploy does not guess how to configure Cilium, a cloud controller, another load balancer, or another CSI provider. Install and validate an unmanaged external system using its own documentation. Use the same advanced choices on every node in one cluster.
+“External” means K3sDeploy deliberately leaves that component uninstalled. For Longhorn, NFS, or external storage, it disables K3s local-storage so an unintended node-local StorageClass does not compete with the selected provider. The local-path choice retains K3s's simple node-local provisioner, displays a data-loss warning, and requires the exact confirmation `ACCEPT-NON-HA-STORAGE`. It does not provide replication or failover. K3sDeploy does not guess how to configure Cilium, a cloud controller, another load balancer, or another CSI provider. Install and validate an unmanaged external system using its own documentation. Use the same advanced choices on every node in one cluster.
 
 Available flags:
 
 ```text
 --dry-run   Display intended host changes where practical
 --verbose   Display commands that do not contain secrets
---yes       Accept ordinary confirmations; exact destructive confirmations remain required
+--yes       Accept ordinary confirmations. Exact destructive confirmations remain required
 --color     Force terminal colours even when NO_COLOR is set
 --no-color  Disable terminal colours without disabling arrow-key menus
 --plain-menu Use numbered prompts instead of the interactive arrow-key selector
@@ -201,7 +203,7 @@ The menu provides:
 
 If K3s is already present, the installer displays a warning before the menu. Fresh-create and fresh-join operations are then blocked before asking for a token or making storage changes. This protects operators who accidentally run the installer on an existing node.
 
-Input mistakes are recoverable. Invalid addresses, occupied VIPs, rejected join tokens, invalid MetalLB ranges, and unavailable storage choices return to the relevant prompt or installer menu. A workflow still stops immediately when continuing could damage existing data or compound a partial installation; the main installer remains open so the operator can review the message, correct the condition, and choose an option again.
+Input mistakes are recoverable. Invalid addresses, occupied VIPs, rejected join tokens, invalid MetalLB ranges, and unavailable storage choices return to the relevant prompt or installer menu. A workflow still stops immediately when continuing could damage existing data or compound a partial installation. The main installer remains open so the operator can review the message, correct the condition, and choose an option again.
 
 ## Creating a new cluster
 
@@ -217,7 +219,7 @@ Run option 1 on the first manager. The installer:
 
 Run option 2 on manager two and manager three, one at a time. Enter the exact API VIP created by option 1 and paste the full secure server token from `sudo cat /var/lib/rancher/k3s/server/token` on a healthy manager. Before collecting hostname or storage choices, K3sDeploy verifies the cluster CA and authenticates against the existing manager. The token is never echoed or written to the general installer state file.
 
-Run option 3 on remaining workers. Cluster-wide components are not reinstalled; the installer prepares local prerequisites and waits until the worker is registered and Ready.
+Run option 3 on remaining workers. Cluster-wide components are not reinstalled. The installer prepares local prerequisites and waits until the worker is registered and Ready.
 
 ## Longhorn storage choices
 
@@ -227,7 +229,7 @@ This section applies when Longhorn is selected. All Longhorn storage modes expos
 
 This is the simplest choice. It is permitted only when root is ext4 or XFS, at least 120 GiB total, and at least 60 GiB free.
 
-The storage menu marks this choice `UNAVAILABLE` when those requirements are not met. Selecting it explains which threshold failed and returns to the storage menu instead of terminating K3sDeploy. The size of the underlying disk does not make a smaller root filesystem eligible automatically.
+The storage menu marks this choice `Unavailable` when those requirements are not met, includes the reason in brackets, greys it out, and skips it during selection. The size of the underlying disk does not make a smaller root filesystem eligible automatically.
 
 The default guardrails are:
 
@@ -245,14 +247,14 @@ The installer can guide creation of separate Longhorn storage without resizing e
 
 Seeing a smaller root filesystem and a larger OS disk is not an error. For example, a Linux installer may place a 59 GiB root logical volume on a 120 GiB physical or virtual disk while the rest remains free inside the LVM volume group. That space is not visible to `parted` as unallocated disk space, so K3sDeploy checks both layers separately.
 
-If `lsblk` already reports the intended virtual-disk size, the guest can see that capacity. Hypervisor thin or thick provisioning does not explain a smaller root logical volume; the unused capacity may simply be free inside LVM. Check it with `sudo vgs` and `sudo lvs`. In that layout, option 2 creates separate Longhorn storage from the free extents without expanding or shrinking root.
+If `lsblk` already reports the intended virtual-disk size, the guest can see that capacity. Hypervisor thin or thick provisioning does not explain a smaller root logical volume. The unused capacity may simply be free inside LVM. Check it with `sudo vgs` and `sudo lvs`. In that layout, option 2 creates separate Longhorn storage from the free extents without expanding or shrinking root.
 
 For an LVM-based root, the installer:
 
 1. Identifies the root volume group and reports its genuinely free extents.
 2. Confirms that the existing root allocation is approximately 30% or more of the OS disk and still has at least 15 GiB available.
 3. Recommends a Longhorn logical-volume size while leaving approximately 1 GiB free in the volume group.
-4. Shows the complete plan and requires an exact `CREATE ... LV ON ...` confirmation.
+4. Shows the complete plan and requires the exact confirmation `CREATE`.
 5. Creates a new logical volume without shrinking or changing the existing root volume.
 6. Formats it as ext4 and mounts it by UUID at `/var/lib/longhorn`.
 
@@ -264,14 +266,14 @@ For a non-LVM layout with physical unallocated space, the installer:
 4. Asks for the desired whole-number partition size, with a 20 GiB small-lab floor and a warning below the 100 GiB general-use recommendation.
 5. Records the plan but changes nothing until the complete installation summary is accepted.
 6. Rechecks that the same byte range is still unallocated.
-7. Requires the operator to type an exact `CREATE ... ON /dev/...` confirmation.
+7. Requires the operator to type the exact confirmation `CREATE`.
 8. Creates only the new partition, formats it as ext4 with label `longhorn-data`, and mounts it by UUID.
 
 If the standard `parted` utility is missing, the installer explains why it is needed and asks before installing the distribution package. Installing that utility does not alter the partition table.
 
 The installer never shrinks, moves, or reformats an existing root filesystem, logical volume, or OS partition. If neither LVM free extents nor physical unallocated space exists, it recommends returning to root storage when eligible or adding an empty virtual/physical disk. An already-created empty partition of at least 20 GiB can also be selected from a numbered list.
 
-If partition creation succeeds but Linux cannot expose the new device immediately, the installer stops with recovery instructions. Reboot and rerun; the empty partition will be offered as an existing candidate instead of creating another blindly.
+If partition creation succeeds but Linux cannot expose the new device immediately, the installer stops with recovery instructions. Reboot and rerun. The empty partition will be offered as an existing candidate instead of creating another blindly.
 
 ### Option 3: separate disk (physical or virtual)
 
@@ -284,7 +286,7 @@ This is the recommended choice for important data. The installer displays a numb
 
 The operator selects a number, reviews the complete plan, and must then type the exact disk path before any destructive action. The installer creates GPT, one ext4 partition, label `longhorn-data`, and a UUID-based `/etc/fstab` mount.
 
-For a virtual machine, attach a new empty virtual disk using the controls provided by the hypervisor or cloud platform. Follow that platform's instructions about whether the VM must be shut down or can hot-add storage. After Linux shows the new device in `lsblk`, rerun K3sDeploy and choose option 3. This applies to Proxmox, VMware, Hyper-V, KVM/libvirt, and cloud VMs; K3sDeploy does not assume one virtualization platform.
+For a virtual machine, attach a new empty virtual disk using the controls provided by the hypervisor or cloud platform. Follow that platform's instructions about whether the VM must be shut down or can hot-add storage. After Linux shows the new device in `lsblk`, rerun K3sDeploy and choose option 3. This applies to Proxmox, VMware, Hyper-V, KVM/libvirt, and cloud VMs. K3sDeploy does not assume one virtualization platform.
 
 For a physical machine, install an empty SSD or NVMe device, boot the machine, verify the new device with `lsblk`, and rerun option 3. K3s recommends SSD-backed storage when possible because cluster performance depends on database performance. Longhorn also recommends SSD/NVMe for performance and stability, especially during replica rebuilds and concurrent I/O. HDD storage is supported but is better suited to lighter or less latency-sensitive workloads.
 
@@ -292,7 +294,7 @@ For separate storage, systemd drop-ins require `/var/lib/longhorn` to be mounted
 
 Longhorn replication is not a backup. Maintain tested backups outside the cluster.
 
-K3sDeploy configures a desired count of three replicas for new Longhorn volumes and enables Longhorn's `least-effort` replica auto-balancing. The desired count is deliberately capped at three; it does not increase to 5, 10, or 20 replicas as more nodes join. A one-node bootstrap is not storage-HA: three storage-capable nodes are required before new three-replica volumes can become fully healthy. Depending on Longhorn's degraded-availability policy, early volume creation may remain degraded or wait for enough eligible nodes. As eligible nodes and disks appear, Longhorn can schedule or rebuild the missing copies toward the existing three-replica target, so K3sDeploy does not rewrite every volume during each node join.
+K3sDeploy configures a desired count of three replicas for new Longhorn volumes and enables Longhorn's `least-effort` replica auto-balancing. The desired count is deliberately capped at three. It does not increase to 5, 10, or 20 replicas as more nodes join. A one-node bootstrap is not storage-HA: three storage-capable nodes are required before new three-replica volumes can become fully healthy. Depending on Longhorn's degraded-availability policy, early volume creation may remain degraded or wait for enough eligible nodes. As eligible nodes and disks appear, Longhorn can schedule or rebuild the missing copies toward the existing three-replica target, so K3sDeploy does not rewrite every volume during each node join.
 
 Changing a StorageClass affects only volumes created afterward. K3sDeploy therefore sets the final desired count from the beginning instead of starting at one and repeatedly changing it. Volumes deliberately created with another StorageClass or replica count are not silently rewritten. Do not treat the cluster as storage-HA until all required replicas are healthy on separate nodes.
 
@@ -307,7 +309,7 @@ NFS export: /mnt/pool/k3s
 
 The same server and export must be reachable from every cluster node. K3sDeploy installs the operating system's NFS client package, checks TCP port `2049`, temporarily mounts the export with restrictive mount options, creates and removes a probe directory to verify provisioning access, installs the pinned CSI driver on the first manager, and creates the default `nfs-csi-retain` StorageClass with retained backing directories and a `Retain` reclaim policy.
 
-Shared does not automatically mean highly available. A single NFS server, network path, or underlying pool can still be a single point of failure. Use an HA NFS service and independently protected data when the cluster requires storage availability. The NFS CSI driver dynamically provisions subdirectories; it does not create, replicate, back up, or repair the NFS server itself.
+Shared does not automatically mean highly available. A single NFS server, network path, or underlying pool can still be a single point of failure. Use an HA NFS service and independently protected data when the cluster requires storage availability. The NFS CSI driver dynamically provisions subdirectories. It does not create, replicate, back up, or repair the NFS server itself.
 
 ## Promoting a worker to manager
 
@@ -330,7 +332,7 @@ Option 5 produces a read-only health report covering the OS, network, K3s servic
 
 If a node created by an older K3sDeploy release still exposes the local-path provisioner while Longhorn, NFS, or external storage is selected, validation reports a warning instead of deleting or reconfiguring potentially used storage automatically.
 
-Option 6 offers only narrow repairs such as starting an existing stopped service, installing a required storage client, repairing the managed kube-vip DaemonSet, or continuing a saved MetalLB, Longhorn, or NFS CSI installation that stopped partway through. It asks before reconciling a missing add-on. kube-vip repair first waits for K3s to accept the current template, then detects terminal container startup failures and prints the termination reason, exit code, logs, and pod events without waiting through the full rollout timeout. Repair always runs the same health report as option 5 afterward and explains that a second manual validation run is unnecessary. When Longhorn is selected, no failed checks remain, and at least two ready schedulable storage nodes exist, it offers an optional functional storage test. On a first-node cluster it explains what that test can and cannot prove and defers the automatic prompt. Workers direct the operator to run the cluster-wide test from a manager because they do not hold an administrative kubeconfig. On a clean node repair explains that there is nothing to repair and points to installation options 1–3; it never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
+Option 6 offers only narrow repairs such as starting an existing stopped service, installing a required storage client, repairing the managed kube-vip DaemonSet, or continuing a saved MetalLB, Longhorn, or NFS CSI installation that stopped partway through. It asks before reconciling a missing add-on. kube-vip repair first waits for K3s to accept the current template, then detects terminal container startup failures and prints the termination reason, exit code, logs, and pod events without waiting through the full rollout timeout. Repair always runs the same health report as option 5 afterward and explains that a second manual validation run is unnecessary. When Longhorn is selected, no failed checks remain, and at least two ready schedulable storage nodes exist, it offers an optional functional storage test. On a first-node cluster it explains what that test can and cannot prove and defers the automatic prompt. Workers direct the operator to run the cluster-wide test from a manager because they do not hold an administrative kubeconfig. On a clean node repair explains that there is nothing to repair and points to installation options 1–3. It never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
 
 After any successful menu workflow, K3sDeploy prints an action-specific completion summary, the final health counts, the log location, and exits normally. A workflow that stops safely because of an invalid input or system condition returns to the menu so the operator can correct it without downloading or starting the installer again.
 
@@ -352,18 +354,18 @@ After any successful menu workflow, K3sDeploy prints an action-specific completi
 
 The MetalLB pool is checked for ordering and overlap with the node address and API VIP. The operator must confirm that the range is reserved outside DHCP. Existing pools are inspected rather than silently replaced during joins.
 
-K3s manages packaged Traefik. Reserve a specific MetalLB address using a K3s `HelmChartConfig`; do not edit generated resources that K3s will overwrite. `templates/traefik/helmchartconfig-example.yaml` provides a starting point.
+K3s manages packaged Traefik. Reserve a specific MetalLB address using a K3s `HelmChartConfig`. Do not edit generated resources that K3s will overwrite. `templates/traefik/helmchartconfig-example.yaml` provides a starting point.
 
 `examples/external-service/grafana.yaml` shows how a selectorless Service, EndpointSlice, and Ingress can expose an application running outside Kubernetes through the same Traefik instance.
 
 ## Backups and operational security
 
 - Back up etcd snapshots, application data, `/etc/rancher/k3s`, and installer state before maintenance.
-- Store Longhorn backups on independent NFS or object storage; replicas alone do not protect against deletion, corruption, or cluster loss.
+- Store Longhorn backups on independent NFS or object storage. Replicas alone do not protect against deletion, corruption, or cluster loss.
 - Protect the server token as an administrative secret.
 - Coordinate manager maintenance and reboots one node at a time.
 - Optional unattended upgrades are restricted to security updates and automatic reboot is disabled.
-- Restrict access to installer logs under `/var/log/k3s-bootstrap/`; they are created with mode `0600`.
+- Restrict access to installer logs under `/var/log/k3s-bootstrap/`. They are created with mode `0600`.
 
 ## Testing
 
@@ -376,15 +378,15 @@ bash tests/test-functions.sh
 bash tests/test-interaction.sh
 ```
 
-The optional Longhorn test creates an isolated namespace, a temporary `Delete` StorageClass, and a 128 MiB one-replica volume. It writes a unique value, removes the writer pod, reattaches the claim to a reader pod, verifies the same value, and removes the namespace and StorageClass. It tests provisioning and persistence without leaving the normal retained StorageClass's PV behind. It does not prove multi-node HA, replica-loss recovery, or backup correctness. K3sDeploy records a successful result in the `k3sdeploy-longhorn-smoke-status` ConfigMap so later validation reports the last pass instead of continuing to say `NOT TESTED`. The first-manager workflow does not offer it automatically; a joining manager and option 6 can offer it once at least two Longhorn storage nodes are ready. A joining worker explains that the test must be started from a manager. It remains available explicitly with `bash tests/smoke-longhorn.sh` after the cluster is healthy.
+The optional Longhorn test creates an isolated namespace, a temporary `Delete` StorageClass, and a 128 MiB one-replica volume. It writes a unique value, removes the writer pod, reattaches the claim to a reader pod, verifies the same value, and removes the namespace and StorageClass. It tests provisioning and persistence without leaving the normal retained StorageClass's PV behind. It does not prove multi-node HA, replica-loss recovery, or backup correctness. K3sDeploy records a successful result in the `k3sdeploy-longhorn-smoke-status` ConfigMap so later validation reports the last pass instead of continuing to say `NOT TESTED`. The first-manager workflow does not offer it automatically. A joining manager and option 6 can offer it once at least two Longhorn storage nodes are ready. A joining worker explains that the test must be started from a manager. It remains available explicitly with `bash tests/smoke-longhorn.sh` after the cluster is healthy.
 
 ## Known limitations
 
-- Nodes are installed one at a time; this release is not a remote multi-node orchestrator.
+- Nodes are installed one at a time. This release is not a remote multi-node orchestrator.
 - Join tokens must be entered manually on each joining node.
 - Existing volume replica counts are never changed automatically.
 - The installer does not restore etcd snapshots, Longhorn backups, or application manifests.
-- Guided same-disk partition creation supports GPT only and consumes existing unallocated space; it does not shrink filesystems.
+- Guided same-disk partition creation supports GPT only and consumes existing unallocated space. It does not shrink filesystems.
 - Address-conflict and Layer-2 checks reduce common mistakes but cannot prove the surrounding network configuration is correct.
 
 ## Troubleshooting
@@ -401,7 +403,7 @@ sudo k3s kubectl -n kube-system describe pod -l app=kube-vip
 findmnt /var/lib/longhorn
 ```
 
-K3sDeploy releases before v0.2.8 could create a kube-vip DaemonSet that mounted the host's `/proc/sys/net`. Some current container runtimes reject that procfs bind mount with `StartError` and exit code `128`. Run option 6 with v0.2.8 or newer to replace that template safely; kube-vip uses host networking and the `NET_ADMIN` and `NET_RAW` capabilities without that mount.
+K3sDeploy releases before v0.2.8 could create a kube-vip DaemonSet that mounted the host's `/proc/sys/net`. Some current container runtimes reject that procfs bind mount with `StartError` and exit code `128`. Run option 6 with v0.2.8 or newer to replace that template safely. kube-vip uses host networking and the `NET_ADMIN` and `NET_RAW` capabilities without that mount.
 
 An unauthenticated HTTP `401 Unauthorized` only means the API endpoint answered. The installer uses authenticated Kubernetes requests for health decisions. Never delete `/var/lib/rancher` or `/var/lib/longhorn` as a troubleshooting shortcut.
 

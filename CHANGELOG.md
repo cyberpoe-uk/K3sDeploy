@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Make unavailable storage choices grey and non-selectable, include the reason in square brackets, and shorten guided LVM or partition confirmation to `CREATE`.
+- Replace the long dash and prose semicolon styles with plain punctuation in installer output and documentation.
 - Stop repeatedly offering an already-completed Longhorn repair by comparing each workload's available replicas with its configured desired count instead of assuming every deployment has exactly one replica.
 - Restore installer colours by detecting the output terminal before colour command substitutions redirect stdout, and add `--color` to override an inherited `NO_COLOR` setting.
 - Add terminal-aware arrow-key menus with Enter/Space confirmation and automatic numbered-prompt fallback for redirected or non-interactive sessions.
@@ -21,23 +23,23 @@
 - Allow safe repair to continue missing MetalLB, Longhorn, or NFS CSI add-ons from saved installer state.
 - Warn when an older installation still exposes the non-selected local-path provisioner instead of removing potentially used storage automatically.
 - Add a yellow K3sDeploy identity banner and a startup choice between recommended and advanced/custom installation profiles.
-- Let advanced users select MetalLB, built-in K3s ServiceLB, or external load balancing, plus Longhorn, K3s local-path, or external persistent storage; intentionally omitted components are skipped during installation and validation.
+- Let advanced users select MetalLB, built-in K3s ServiceLB, or external load balancing, plus Longhorn, K3s local-path, or external persistent storage. Intentionally omitted components are skipped during installation and validation.
 - Prevent a normal clean-node Longhorn mount check from aborting phase 2 under strict error handling.
 - Group interactive output into clearly separated sections and expand installation workflows so error line numbers identify the failing operation.
 - Parse `/etc/os-release` without sourcing it, avoiding a collision between its `VERSION` field and K3sDeploy's read-only installer version.
-- Keep the interactive installer open after recoverable workflow failures; invalid VIPs, join credentials, hostnames, address pools, and menu selections can now be corrected without restarting it.
+- Keep the interactive installer open after recoverable workflow failures. Invalid VIPs, join credentials, hostnames, address pools, and menu selections can now be corrected without restarting it.
 - Detect the operating system and use its `apt`, `dnf`, `yum`, or `zypper` package manager instead of presenting Ubuntu-specific dependency instructions.
 - Replace legacy user-facing product wording with “installer” and “K3sDeploy Installer”.
 - Correct LVM root-volume discovery when Linux exposes the mounted root as `/dev/dm-*`, so free volume-group extents are reported instead of `0 GiB`.
 - Mark ineligible shared-root storage without terminating the installer, and return the operator to the storage menu with physical and virtualization-neutral disk guidance.
-- Distinguish a positive ARP duplicate-address response from an operational probe failure; occupied VIPs now stop safely, with ICMP used only as a fallback signal.
+- Distinguish a positive ARP duplicate-address response from an operational probe failure. Occupied VIPs now stop safely, with ICMP used only as a fallback signal.
 - Recommend SSD/NVMe storage for K3s and Longhorn while retaining HDD support for appropriate workloads.
-- Default-Yes confirmations for detected hostname/address, network reservations, and safe dependency or service operations; destructive and risk-acceptance prompts remain default-No.
+- Default-Yes confirmations for detected hostname/address, network reservations, and safe dependency or service operations. Destructive and risk-acceptance prompts remain default-No.
 - Optional installation of the detected operating system's arping package before checking whether a new API VIP is already in use.
 - Guided creation of a dedicated Longhorn LVM logical volume from free extents in common Linux layouts, with root-headroom checks and exact confirmation.
 - Clean-node validation now reports uninstalled components as `MISSING` or `SKIP`, and safe repair no longer offers to start a nonexistent K3s service.
 - Manager and worker joins verify the existing API VIP and secure join token before collecting local storage choices.
-- Removed hardcoded lab network addresses; hostname and detected node-address confirmations now include beginner-facing guidance.
+- Removed hardcoded lab network addresses. Hostname and detected node-address confirmations now include beginner-facing guidance.
 - Corrected physical OS-disk discovery through LVM/device-mapper ancestry and clarified guided OS-partition creation.
 - Replaced the arbitrary 100 GiB Longhorn hard minimum with a 20 GiB small-lab floor plus a 100 GiB general-use recommendation and capacity warning.
 
@@ -47,7 +49,7 @@
 - Pinned K3s, kube-vip, MetalLB and Longhorn manifests.
 - Conservative root/dedicated storage selection and pure-function tests.
 - Normal-user launch with scoped sudo elevation and an explicit phase-progress banner.
-- Worker/agent joins for larger clusters; recommends three or five etcd servers rather than making every node an etcd member.
+- Worker/agent joins for larger clusters. Recommends three or five etcd servers rather than making every node an etcd member.
 - Guarded worker-to-manager promotion with drain/delete instructions, exact destructive confirmation, protected local backup, server-token join, and post-promotion role validation.
 - Three guided Longhorn storage modes with configurable capacity thresholds, standardized UUID mounts, root-space guardrails, and refusal to shrink live OS filesystems.
 - Customer-facing prerequisites and operations guide, immediate existing-K3s warnings, numbered disk selection, and guided GPT partition creation from verified unallocated space.

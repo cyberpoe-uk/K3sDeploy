@@ -41,6 +41,13 @@ menu_select MENU_TEST 'Test menu' 2 'First choice' 'Second choice' 'Third choice
 assert_eq "$MENU_TEST" 2
 menu_select MENU_TEST 'Test menu' 1 'First choice' 'Second choice' 'Third choice' <<< '3'
 assert_eq "$MENU_TEST" 3
+menu_select MENU_TEST 'Disabled menu test' 1 "${MENU_DISABLED_PREFIX}Unavailable choice [Unavailable - test reason]" 'Enabled choice' <<< ''
+assert_eq "$MENU_TEST" 2
+menu_select MENU_TEST 'Disabled selection test' 2 "${MENU_DISABLED_PREFIX}Unavailable choice [Unavailable - test reason]" 'Enabled choice' <<< $'1\n2'
+assert_eq "$MENU_TEST" 2
+disabled_render=$(render_menu_options 2 "${MENU_DISABLED_PREFIX}Unavailable choice [Unavailable - test reason]" 'Enabled choice')
+assert_ok grep -q '\[Unavailable - test reason\]' <<<"$disabled_render"
+assert_bad grep -q "$MENU_DISABLED_PREFIX" <<<"$disabled_render"
 selected=
 menu_select selected 'Shadow-safe menu' 1 'First choice' 'Second choice' <<< '2'
 assert_eq "$selected" 2

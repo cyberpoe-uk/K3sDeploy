@@ -37,9 +37,9 @@ Usage: ./k3s-bootstrap.sh [--dry-run] [--verbose] [--yes] [--color|--no-color] [
 Interactive modes: create first manager, join manager, join worker, promote worker, validate, safe repair.
 --dry-run  Show intended host changes (cluster queries may still be read-only)
 --verbose  Show commands as they run (secret-bearing commands remain redacted)
---yes      Accept ordinary confirmations; never bypasses exact disk confirmation
+--yes      Accept ordinary confirmations, never bypasses exact disk confirmation
 --color    Force terminal colours even when the NO_COLOR variable is set
---no-color Disable terminal colours; interactive arrow-key menus remain enabled
+--no-color Disable terminal colours, interactive arrow-key menus remain enabled
 --plain-menu Use numbered prompts instead of the interactive arrow-key selector
 EOF
 }
@@ -56,7 +56,7 @@ collect_nfs_config(){
     '  K3sDeploy will install the Kubernetes NFS CSI driver and use one existing' \
     '  NFSv4.1 export for dynamically provisioned persistent volumes.' \
     '  Every cluster node must be able to reach the same server and export.' \
-    '  A single NFS server is still a single point of failure; shared storage is' \
+    '  A single NFS server is still a single point of failure. Shared storage is' \
     '  highly available only when the NFS service and its data are themselves HA.'
   printf '\n'
   while true; do
@@ -77,9 +77,9 @@ configure_advanced_profile(){
   section 'Advanced load-balancer choice'
   while true; do
     menu_select choice 'Choose load-balancer mode' 1 \
-      'MetalLB — recommended and managed by K3sDeploy' \
-      'K3s ServiceLB — built in, but not the recommended HA design' \
-      'External or none — installed and managed separately'
+      'MetalLB - recommended and managed by K3sDeploy' \
+      'K3s ServiceLB - built in, but not the recommended HA design' \
+      'External or none - installed and managed separately'
     case $choice in
       1) LOAD_BALANCER_MODE=metallb; break;;
       2)
@@ -97,10 +97,10 @@ configure_advanced_profile(){
   section 'Advanced persistent-storage choice'
   while true; do
     menu_select choice 'Choose persistent-storage mode' 1 \
-      'Longhorn — recommended HA storage managed by K3sDeploy' \
-      'Shared NFS — guided NFS CSI setup using an existing export' \
-      'K3s local-path — NON-HA node-local storage; risk acceptance required' \
-      'Other external or none — storage is managed separately'
+      'Longhorn - recommended HA storage managed by K3sDeploy' \
+      'Shared NFS - guided NFS CSI setup using an existing export' \
+      'K3s local-path - NON-HA node-local storage, risk acceptance required' \
+      'Other external or none - storage is managed separately'
     case $choice in
       1) STORAGE_PROVIDER=longhorn; break;;
       2) STORAGE_PROVIDER=nfs; collect_nfs_config; break;;
@@ -151,9 +151,9 @@ prepare_storage_choice(){
       STORAGE_DEVICE="$NFS_SERVER:$NFS_EXPORT"
       STORAGE_DESCRIPTION='install the pinned NFS CSI driver and create the nfs-csi-retain StorageClass'
     elif [[ $STORAGE_PROVIDER == local-path ]]; then
-      STORAGE_DESCRIPTION='use the built-in K3s local-path provisioner; data remains tied to one node'
+      STORAGE_DESCRIPTION='use the built-in K3s local-path provisioner, data remains tied to one node'
     else
-      STORAGE_DESCRIPTION='externally managed; K3s local-storage is disabled and no storage device is changed'
+      STORAGE_DESCRIPTION='externally managed, K3s local-storage is disabled and no storage device is changed'
     fi
     LONGHORN_PATH=
     LONGHORN_DEVICE_UUID=
@@ -180,19 +180,19 @@ prompt_ipv4(){
   local var=$1 prompt=$2 value
   while true; do
     read -r -p "$prompt: " value
-    if [[ -z $value ]]; then warn "$prompt cannot be empty; please try again."; continue; fi
+    if [[ -z $value ]]; then warn "$prompt cannot be empty, please try again."; continue; fi
     if validate_ipv4 "$value"; then printf -v "$var" '%s' "$value"; return; fi
-    warn "'$value' is not a valid IPv4 address; please try again."
+    warn "'$value' is not a valid IPv4 address, please try again."
   done
 }
 prompt_hostname(){
   local var=$1 prompt=$2 value
   while true; do
     read -r -p "$prompt: " value
-    if [[ -z $value ]]; then warn "$prompt cannot be empty; please try again."; continue; fi
+    if [[ -z $value ]]; then warn "$prompt cannot be empty, please try again."; continue; fi
     value=${value,,}
     if [[ ${#value} -le 253 && $value =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && $value != *..* ]]; then printf -v "$var" '%s' "$value"; return; fi
-    warn "'$value' is not valid. Use lowercase letters, numbers, dots or hyphens; please try again."
+    warn "'$value' is not valid. Use lowercase letters, numbers, dots or hyphens, then try again."
   done
 }
 collect_local_identity(){
@@ -234,7 +234,7 @@ collect_new_cluster_vip(){
   while true; do
     prompt_ipv4 API_VIP 'Enter the unused API VIP for this new cluster'
     if [[ $NODE_IP == "$API_VIP" ]]; then
-      warn 'Node IP and API VIP must differ; enter another address.'
+      warn 'Node IP and API VIP must differ. Enter another address.'
       continue
     fi
     if ! same_subnet "$NODE_IP" "$API_VIP" 24; then
@@ -277,7 +277,7 @@ collect_join_access(){
     printf '%s: ' "$token_label"
     read -rs JOIN_TOKEN
     echo
-    if [[ -z $JOIN_TOKEN ]]; then warn 'Join token cannot be empty; please try again.'; continue; fi
+    if [[ -z $JOIN_TOKEN ]]; then warn 'Join token cannot be empty. Please try again.'; continue; fi
     verify_existing_cluster_token "$role" "$JOIN_TOKEN" && return
     JOIN_TOKEN=
     warn 'Cluster verification failed. Re-enter the VIP and token.'
@@ -299,9 +299,9 @@ collect_metallb_pool(){
   while true; do
     prompt_ipv4 POOL_START 'First MetalLB address'
     prompt_ipv4 POOL_END 'Last MetalLB address'
-    if (( $(ip_to_int "$POOL_START") > $(ip_to_int "$POOL_END") )); then warn 'MetalLB range is reversed; enter the range again.'; continue; fi
-    if ip_in_range "$API_VIP" "$POOL_START" "$POOL_END"; then warn 'API VIP overlaps the MetalLB pool; enter a different range.'; continue; fi
-    if ip_in_range "$NODE_IP" "$POOL_START" "$POOL_END"; then warn 'Node IP overlaps the MetalLB pool; enter a different range.'; continue; fi
+    if (( $(ip_to_int "$POOL_START") > $(ip_to_int "$POOL_END") )); then warn 'MetalLB range is reversed. Enter the range again.'; continue; fi
+    if ip_in_range "$API_VIP" "$POOL_START" "$POOL_END"; then warn 'API VIP overlaps the MetalLB pool. Enter a different range.'; continue; fi
+    if ip_in_range "$NODE_IP" "$POOL_START" "$POOL_END"; then warn 'Node IP overlaps the MetalLB pool. Enter a different range.'; continue; fi
     confirm_yes 'I confirm this entire MetalLB range is unused and excluded from DHCP' && return
     info 'Reserve the complete range or enter a different range.'
   done
@@ -343,7 +343,7 @@ new_cluster(){
   if use_metallb; then summary 'Create new K3s cluster / first server' "$POOL_START-$POOL_END"; else summary 'Create new K3s cluster / first server' "managed by $LOAD_BALANCER_MODE"; fi
   preflight_show
   detect_existing
-  [[ $K3S_INSTALLED == no && ! -f $CONFIG_FILE ]] || die 'Existing K3s detected. Use validate/repair; refusing to initialize over it.'
+  [[ $K3S_INSTALLED == no && ! -f $CONFIG_FILE ]] || die 'Existing K3s detected. Use validate/repair. Refusing to initialize over it.'
   if use_longhorn; then [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to initialize a new cluster over it.'; fi
   section 'Final confirmation'
   confirm 'Apply this installation plan?' || { skip 'Cancelled'; return; }
@@ -362,7 +362,7 @@ new_cluster(){
   install_kube_vip
 
   phase 6 8 'Installing MetalLB for application addresses'
-  if use_metallb; then install_metallb; else skip "MetalLB not selected; load-balancer mode is $LOAD_BALANCER_MODE"; fi
+  if use_metallb; then install_metallb; else skip "MetalLB not selected. Load-balancer mode is $LOAD_BALANCER_MODE"; fi
 
   phase 7 8 'Installing persistent storage and host prerequisites'
   install_cluster_storage
@@ -388,7 +388,7 @@ join_cluster(){
   preflight_show
   detect_existing
   if [[ $K3S_INSTALLED == yes || -f $CONFIG_FILE ]]; then
-    die 'Existing K3s/config detected. Use validate/repair; refusing to overwrite or rejoin.'
+    die 'Existing K3s/config detected. Use validate/repair. Refusing to overwrite or rejoin.'
   fi
   if use_longhorn; then [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to join over it without manual recovery review.'; fi
   section 'Final confirmation'
@@ -437,7 +437,7 @@ join_agent(){
   preflight_show
   detect_existing
   if [[ $K3S_INSTALLED == yes || -f $CONFIG_FILE ]]; then
-    die 'Existing K3s/config detected. Use validate/repair; refusing to overwrite or rejoin.'
+    die 'Existing K3s/config detected. Use validate/repair. Refusing to overwrite or rejoin.'
   fi
   if use_longhorn; then [[ $LONGHORN_DATA_PRESENT == no ]] || die 'Existing Longhorn data was found. Refusing to join over it without manual recovery review.'; fi
   section 'Final confirmation'
@@ -468,9 +468,9 @@ join_agent(){
 promotion_backup(){ local stamp dir; stamp=$(date +%Y%m%d-%H%M%S); dir="/etc/k3s-bootstrap/promotion-backup-$stamp"; as_root install -d -m 700 "$dir"; for item in /etc/rancher/k3s/config.yaml /etc/rancher/node/password /etc/systemd/system/k3s-agent.service /etc/systemd/system/k3s-agent.service.env; do [[ -e $item ]] && as_root cp -a -- "$item" "$dir/"; done; info "Saved protected pre-promotion files in $dir"; }
 promote_agent(){
   NODE_ROLE=${NODE_ROLE:-agent}; TARGET_ROLE='control-plane + etcd + schedulable worker'; phase 1 7 'Verifying that this machine is an existing worker'
-  systemctl list-unit-files --no-legend k3s-agent.service 2>/dev/null | grep -q '^k3s-agent.service' || die 'This machine does not have a k3s-agent service; use the normal manager join option instead.'
-  systemctl is-active --quiet k3s-agent || die 'k3s-agent is not active; repair the worker before attempting promotion.'
-  systemctl is-active --quiet k3s && die 'k3s server is already active; this node is not a worker-only node.'
+  systemctl list-unit-files --no-legend k3s-agent.service 2>/dev/null | grep -q '^k3s-agent.service' || die 'This machine does not have a k3s-agent service. Use the normal manager join option instead.'
+  systemctl is-active --quiet k3s-agent || die 'k3s-agent is not active. Repair the worker before attempting promotion.'
+  systemctl is-active --quiet k3s && die 'k3s server is already active. This node is not a worker-only node.'
   DESIRED_HOSTNAME=$(short_hostname); NODE_IP=${NODE_IP:-$(awk '$1=="node-ip:"{print $2; exit}' "$CONFIG_FILE" 2>/dev/null || true)}
   [[ -n ${NODE_IP:-} ]] || prompt_default NODE_IP 'Node IPv4 address' "$DETECTED_IP"; valid_ip_or_die 'Node IP' "$NODE_IP"
   if [[ -z ${API_VIP:-} ]]; then
@@ -486,16 +486,16 @@ promote_agent(){
   printf 'If this replaces a failed manager, remove/decommission that failed member safely first. Confirm the remaining etcd cluster has quorum.\n'
   local cluster_confirmation; read -r -p 'Type DRAINED-AND-DELETED after completing those steps: ' cluster_confirmation
   [[ $cluster_confirmation == DRAINED-AND-DELETED ]] || die 'Promotion cancelled: cluster-side preparation was not confirmed.'
-  printf 'K3s SERVER token (input hidden; an agent-only token cannot promote a node): '; read -rs JOIN_TOKEN; echo; [[ -n $JOIN_TOKEN ]] || die 'Server token cannot be empty'
+  printf 'K3s SERVER token (input hidden, an agent-only token cannot promote a node): '; read -rs JOIN_TOKEN; echo; [[ -n $JOIN_TOKEN ]] || die 'Server token cannot be empty'
   phase 3 7 'Reviewing the irreversible local conversion'; summary 'Promote existing worker to manager' 'existing cluster services'; local exact; read -r -p "Type 'PROMOTE $DESIRED_HOSTNAME' to remove the local agent installation: " exact; [[ $exact == "PROMOTE $DESIRED_HOSTNAME" ]] || die 'Exact promotion confirmation failed.'
   phase 4 7 'Backing up local configuration and removing the agent role'; promotion_backup
-  [[ -x /usr/local/bin/k3s-agent-uninstall.sh ]] || die 'Official k3s-agent-uninstall.sh was not found; no removal was attempted.'
+  [[ -x /usr/local/bin/k3s-agent-uninstall.sh ]] || die 'Official k3s-agent-uninstall.sh was not found. No removal was attempted.'
   as_root /usr/local/bin/k3s-agent-uninstall.sh
   phase 5 7 'Installing this machine as a manager/server'; local cfg; cfg=$(render_k3s_config join "$JOIN_TOKEN"); install_k3s "$cfg" server; JOIN_TOKEN=; cfg=; NODE_ROLE=server; persist_state
   phase 6 7 'Waiting for Ready, control-plane and etcd membership'; wait_k3s; wait_local_node; check_kube_vip_interface || warn 'kube-vip requires operator attention'; if use_longhorn; then ensure_iscsi; elif use_nfs; then ensure_nfs_client; else skip 'No managed storage host prerequisites selected'; fi
   phase 7 7 'Running final health and quorum-oriented validation'; validate_cluster; offer_longhorn_smoke
 }
-configure_updates_prompt(){ if ! security_updates_supported; then skip "Automatic security-update configuration is not changed on $OS_NAME; use its native update policy."; elif confirm 'Enable security-only unattended upgrades (automatic reboot disabled)?'; then configure_updates; else skip 'Unattended upgrades unchanged'; fi; }
+configure_updates_prompt(){ if ! security_updates_supported; then skip "Automatic security-update configuration is not changed on $OS_NAME. Use its native update policy."; elif confirm 'Enable security-only unattended upgrades (automatic reboot disabled)?'; then configure_updates; else skip 'Unattended upgrades unchanged'; fi; }
 load_state(){ local state_content; if [[ -r $STATE_FILE ]]; then state_content=$(<"$STATE_FILE"); elif sudo -n test -r "$STATE_FILE" 2>/dev/null; then state_content=$(sudo cat "$STATE_FILE"); else return 0; fi; while IFS='=' read -r key value; do case $key in INSTALL_PROFILE|LOAD_BALANCER_MODE|STORAGE_PROVIDER|NODE_ROLE|NODE_IP|API_VIP|POOL_START|POOL_END|STORAGE_MODE|STORAGE_DEVICE|LONGHORN_PATH|LONGHORN_DEVICE_UUID|LONGHORN_REPLICAS|NFS_SERVER|NFS_EXPORT) printf -v "$key" '%s' "$value";; esac; done <<<"$state_content"; }
 show_main_menu(){
   local variable=$1 default=1
@@ -504,12 +504,12 @@ show_main_menu(){
   printf '  Profile: %s | Load balancer: %s | Storage: %s\n' "$INSTALL_PROFILE" "$LOAD_BALANCER_MODE" "$STORAGE_PROVIDER"
   printf '  For most clusters, use 3 or 5 managers and join the remaining machines as workers.\n\n'
   menu_select "$variable" 'Choose an installer action' "$default" \
-    'Create new K3s cluster — first manager' \
-    'Join existing cluster — manager with control-plane + etcd' \
-    'Join existing cluster — worker' \
-    'Upgrade this worker to manager — control-plane + etcd' \
-    'Validate this node and cluster — read only' \
-    'Repair safe local differences — asks before changes' \
+    'Create new K3s cluster - first manager' \
+    'Join existing cluster - manager with control-plane + etcd' \
+    'Join existing cluster - worker' \
+    'Upgrade this worker to manager - control-plane + etcd' \
+    'Validate this node and cluster - read only' \
+    'Repair safe local differences - asks before changes' \
     'Exit'
 }
 workflow_completion_summary(){
@@ -524,7 +524,7 @@ workflow_completion_summary(){
     2)
       printf '%s\n' \
         '  Result: this manager joined the existing control plane and etcd cluster.' \
-        '  Next: complete an odd manager count—normally three—before relying on HA.'
+        '  Next: complete an odd manager count - normally three - before relying on HA.'
       ;;
     3)
       printf '%s\n' \
@@ -544,7 +544,7 @@ workflow_completion_summary(){
     6)
       printf '%s\n' \
         '  Result: safe-repair checks and any repairs you explicitly confirmed completed.' \
-        '  Validation: the final health report above is the post-repair result; option 5 does not need to be run again.'
+        '  Validation: the final health report above is the post-repair result. Option 5 does not need to be run again.'
       ;;
   esac
   printf '  Health: %s failed check(s), %s warning(s), %s untested check(s).\n' \
@@ -567,7 +567,7 @@ dispatch_action(){
   require_privileges
   [[ $action =~ ^[4-6]$ ]] && load_state
   if [[ $action =~ ^[1-3]$ ]] && { [[ $K3S_INSTALLED == yes ]] || as_root_capture test -e "$CONFIG_FILE" || systemctl is-active --quiet k3s || systemctl is-active --quiet k3s-agent; }; then
-    die 'Existing K3s state detected. Refusing a fresh installation; choose validation or safe repair instead.'
+    die 'Existing K3s state detected. Refusing a fresh installation. Choose validation or safe repair instead.'
   fi
   case $action in
     1) new_cluster;;
@@ -615,7 +615,7 @@ main(){
     announce_existing_k3s
     show_main_menu action
     [[ $action == 7 ]] && return 0
-    if [[ ! $action =~ ^[1-6]$ ]]; then warn 'Invalid selection; choose a number from 1 to 7.'; continue; fi
+    if [[ ! $action =~ ^[1-6]$ ]]; then warn 'Invalid selection. Choose a number from 1 to 7.'; continue; fi
     run_menu_action "$action"
     $LAST_WORKFLOW_SUCCEEDED && return 0
   done
