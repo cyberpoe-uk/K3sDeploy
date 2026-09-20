@@ -99,12 +99,12 @@ snapshot_config_sample='data-dir: "/srv/k3s-data"
 etcd-snapshot-dir: '\''/srv/k3s-snapshots'\'' # protected snapshots'
 assert_eq "$(parse_k3s_yaml_scalar data-dir <<<"$snapshot_config_sample")" /srv/k3s-data
 assert_eq "$(parse_k3s_yaml_scalar etcd-snapshot-dir <<<"$snapshot_config_sample")" /srv/k3s-snapshots
-assert_eq "$(milestone_snapshot_name manager-joined 2026-09-21-012345)" 'k3sdeploy-manager-joined-2026-09-21-012345'
 snapshot_save_command=$(
   as_root(){ printf '%s\n' "$*"; }
-  ETCD_SNAPSHOT_COMPRESS=true run_etcd_snapshot_save /srv/k3s-data /srv/k3s-snapshots k3sdeploy-manager-joined-2026-09-21-012345
+  ETCD_SNAPSHOT_COMPRESS=true run_etcd_snapshot_save /srv/k3s-data /srv/k3s-snapshots k3sdeploy-manager-joined
 )
-assert_ok grep -Fq -- 'k3s etcd-snapshot save --config /dev/null --data-dir /srv/k3s-data --dir /srv/k3s-snapshots --name k3sdeploy-manager-joined-2026-09-21-012345 --snapshot-compress' <<<"$snapshot_save_command"
+assert_ok grep -Fq -- 'k3s etcd-snapshot save --config /dev/null --data-dir /srv/k3s-data --dir /srv/k3s-snapshots --name k3sdeploy-manager-joined --snapshot-compress' <<<"$snapshot_save_command"
+assert_bad grep -Eq -- 'k3sdeploy-manager-joined-[0-9]{4}-[0-9]{2}-[0-9]{2}' <<<"$snapshot_save_command"
 snapshot_prune_command=$(
   as_root(){ printf '%s\n' "$*"; }
   run_etcd_snapshot_prune /srv/k3s-data /srv/k3s-snapshots k3sdeploy-manager-joined 1

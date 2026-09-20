@@ -2,10 +2,11 @@
 
 ## Unreleased
 
+- Keep K3sDeploy milestone snapshot names concise and rely on the restore menu's
+  explicit creation date instead of repeating a readable date in the filename.
 - Discover and validate snapshots through privileged path resolution so the
   guarded restore menu can read the root-only snapshot directory it protects.
-- Give milestone snapshots a readable UTC date and time in their K3s-managed
-  names. Snapshot save and prune commands now use an isolated command
+- Isolate milestone snapshot save and prune commands from the server command
   configuration, preventing server-only settings and the configured retention
   alias from colliding with the prune request.
 - Replace the ambiguous root-headroom warning with the current root size, free

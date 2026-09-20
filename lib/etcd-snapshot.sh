@@ -110,11 +110,6 @@ newest_snapshot_matching(){
     sort -t '|' -k1,1nr | awk -F'|' 'NR==1 {print $2}'
 }
 
-milestone_snapshot_name(){
-  local label=$1 timestamp=${2:-$(date -u '+%Y-%m-%d-%H%M%S')}
-  printf 'k3sdeploy-%s-%s\n' "$label" "$timestamp"
-}
-
 run_etcd_snapshot_save(){
   local data_dir=$1 directory=$2 name=$3
   local -a args=(
@@ -143,7 +138,7 @@ create_etcd_snapshot(){
   ETCD_LAST_SNAPSHOT=
   managed_etcd_snapshots || { skip "Etcd snapshot omitted because external backup ownership is selected: k3sdeploy-$label"; return 0; }
   prefix="k3sdeploy-$label"
-  snapshot_name=$(milestone_snapshot_name "$label")
+  snapshot_name=$prefix
   if $DRY_RUN; then
     change "Would create an official K3s etcd snapshot named $snapshot_name"
     return 0
