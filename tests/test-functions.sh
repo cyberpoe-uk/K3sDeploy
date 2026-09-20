@@ -81,6 +81,32 @@ assert_ok grep -q '^server: https://10.10.20.10:6443$' <<<"$agent_rendered"
 assert_ok grep -q '^token: "agent-secret-token"$' <<<"$agent_rendered"
 assert_bad grep -q '^advertise-address:' <<<"$agent_rendered"
 assert_bad grep -q '^disable:' <<<"$agent_rendered"
+# shellcheck source=../lib/etcd-recovery.sh
+source "$ROOT/lib/etcd-recovery.sh"
+quorum_sample='Sep 20 k3s-demo1 k3s[43591]: {"level":"warn","msg":"failed to publish local member to cluster through raft","error":"context deadline exceeded"}'
+assert_ok etcd_quorum_log_evidence <<<"$quorum_sample"
+assert_ok etcd_quorum_log_evidence <<< 'Failed to check local etcd status for learner management: context deadline exceeded'
+assert_bad etcd_quorum_log_evidence <<< 'K3s API server started successfully'
+recovery_config=$(render_single_member_recovery_config <<'EOF'
+server: https://10.10.10.105:6443
+token: "secret-test-token"
+cluster-init: false
+node-ip: 10.10.10.101
+advertise-address: 10.10.10.101
+tls-san:
+  - 10.10.10.105
+disable:
+  - servicelb
+  - local-storage
+EOF
+)
+assert_eq "$(grep -c '^cluster-init: true$' <<<"$recovery_config")" 1
+assert_bad grep -Eq '^(server|token):' <<<"$recovery_config"
+assert_ok grep -q '^node-ip: 10.10.10.101$' <<<"$recovery_config"
+assert_ok grep -q '^  - 10.10.10.105$' <<<"$recovery_config"
+assert_ok grep -q '^  - local-storage$' <<<"$recovery_config"
+assert_ok etcd_recovery_backup_space_sufficient 104857600 209715200
+assert_bad etcd_recovery_backup_space_sufficient 104857601 209715200
 source "$ROOT/config/defaults.env"
 source "$ROOT/lib/storage.sh"
 source "$ROOT/lib/longhorn.sh"

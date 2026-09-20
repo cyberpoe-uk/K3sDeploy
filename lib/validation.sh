@@ -267,6 +267,13 @@ safe_repair(){
     validate_cluster
     return 0
   fi
+  if command -v lost_etcd_quorum_detected >/dev/null 2>&1 && lost_etcd_quorum_detected; then
+    error 'This manager appears to have lost embedded-etcd quorum. Ordinary safe repair cannot change datastore membership.'
+    info 'Return to the menu and choose option 7 for guarded quorum disaster recovery.'
+    info 'Option 7 will recheck the evidence, explain the impact, create a protected backup, and require exact confirmation.'
+    validate_cluster
+    return 0
+  fi
   local service=
   if systemd_unit_exists k3s; then service=k3s; elif systemd_unit_exists k3s-agent; then service=k3s-agent; fi
   if [[ -n $service ]]; then

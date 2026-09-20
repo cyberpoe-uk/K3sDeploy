@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a separate, guarded embedded-etcd lost-quorum recovery workflow. It requires a local server datastore, an unavailable API, strong recent quorum-failure evidence, a protected pre-reset backup, and exact operator confirmation before resetting the selected manager to one-member etcd. It never runs from safe repair or through `--yes`.
+- Resume rather than repeat a reset when K3s has already written its reset-completion flag, remove stale Kubernetes Node objects only for former managers, preserve Longhorn records for data review, and print mandatory clean-rejoin guidance.
 - Ask for the existing API VIP before showing token-retrieval instructions, avoid repeating a token pasted into a visible address field, and warn that an exposed token should be rotated.
 - Prepare storage clients before a node joins, then wait for kube-vip, MetalLB, and the selected storage add-on to become ready on the new node before final validation. Longhorn must also report the new node ready and schedulable.
 - Prevent installation and promotion workflows from reporting success when final health validation still has failed checks.

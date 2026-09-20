@@ -91,6 +91,24 @@ assert_eq "$LOAD_BALANCER_MODE" metallb
 assert_eq "$STORAGE_PROVIDER" longhorn
 banner_output=$(show_banner)
 assert_ok grep -q 'K3SDEPLOY.*K3sDeploy' <<<"$banner_output"
+K3SDEPLOY_PLAIN_MENU=1
+K3S_INSTALLED=yes
+menu_output_file=$(mktemp -t k3sdeploy-main-menu-XXXXXX)
+show_main_menu MENU_TEST_ACTION <<< '8' >"$menu_output_file"
+menu_output=$(<"$menu_output_file")
+rm -f "$menu_output_file"
+assert_eq "$MENU_TEST_ACTION" 8
+assert_ok grep -q 'Recover lost embedded-etcd quorum - disaster recovery' <<<"$menu_output"
+assert_ok grep -q '^  8\. Exit$' <<<"$menu_output"
+unset K3SDEPLOY_PLAIN_MENU
+
+assert_ok confirm_etcd_recovery k3s-test <<< 'RESET ETCD TO k3s-test'
+if confirm_etcd_recovery k3s-test <<< 'yes'; then
+  printf 'FAIL ordinary yes bypassed exact etcd recovery confirmation\n'
+  ((++fail))
+else
+  ((++pass))
+fi
 
 DESIRED_HOSTNAME=k3s-test
 NODE_IP=10.10.10.101

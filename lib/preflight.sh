@@ -60,7 +60,7 @@ announce_existing_k3s(){
   if [[ $K3S_INSTALLED == yes || $server_state != not-installed || $agent_state != not-installed || $config_state == present ]]; then
     warn "K3s was detected on this machine. New-cluster and fresh-join operations will be blocked to protect it."
     info "Detected state: binary=$K3S_INSTALLED, config=$config_state, k3s=$server_state, k3s-agent=$agent_state"
-    info "Choose validation, safe repair, or worker promotion as appropriate."
+    info "Choose validation, safe repair, worker promotion, or guarded quorum recovery as appropriate."
   else
     ok "No existing K3s installation was detected"
   fi

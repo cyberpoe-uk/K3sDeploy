@@ -198,7 +198,8 @@ The menu provides:
 4. Upgrade K3s cluster worker node to manager (control-plane + etcd)
 5. Validate this node and cluster
 6. Repair safe local differences
-7. Exit
+7. Recover lost embedded-etcd quorum (disaster recovery)
+8. Exit
 ```
 
 If K3s is already present, the installer displays a warning before the menu. Fresh-create and fresh-join operations are then blocked before asking for a token or making storage changes. This protects operators who accidentally run the installer on an existing node.
@@ -336,7 +337,42 @@ Option 5 produces a read-only health report covering the OS, network, K3s servic
 
 If a node created by an older K3sDeploy release still exposes the local-path provisioner while Longhorn, NFS, or external storage is selected, validation reports a warning instead of deleting or reconfiguring potentially used storage automatically.
 
-Option 6 offers only narrow repairs such as starting an existing stopped service, installing a required storage client, repairing the managed kube-vip DaemonSet, or continuing a saved MetalLB, Longhorn, or NFS CSI installation that stopped partway through. It asks before reconciling a missing add-on. kube-vip repair first waits for K3s to accept the current template, then detects terminal container startup failures and prints the termination reason, exit code, logs, and pod events without waiting through the full rollout timeout. Repair always runs the same health report as option 5 afterward and explains that a second manual validation run is unnecessary. When Longhorn is selected, no failed checks remain, and at least two ready schedulable storage nodes exist, it offers an optional functional storage test. On a first-node cluster it explains what that test can and cannot prove and defers the automatic prompt. Workers direct the operator to run the cluster-wide test from a manager because they do not hold an administrative kubeconfig. On a clean node repair explains that there is nothing to repair and points to installation options 1–3. It never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
+Option 6 offers only narrow repairs such as starting an existing stopped service, installing a required storage client, repairing the managed kube-vip DaemonSet, or continuing a saved MetalLB, Longhorn, or NFS CSI installation that stopped partway through. It asks before reconciling a missing add-on. kube-vip repair first waits for K3s to accept the current template, then detects terminal container startup failures and prints the termination reason, exit code, logs, and pod events without waiting through the full rollout timeout. Repair always runs the same health report as option 5 afterward and explains that a second manual validation run is unnecessary. When Longhorn is selected, no failed checks remain, and at least two ready schedulable storage nodes exist, it offers an optional functional storage test. On a first-node cluster it explains what that test can and cannot prove and defers the automatic prompt. Workers direct the operator to run the cluster-wide test from a manager because they do not hold an administrative kubeconfig. On a clean node repair explains that there is nothing to repair and points to installation options 1–3. It never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically. If it detects strong lost-quorum evidence, it makes no membership change and directs the operator to option 7. Lost-quorum recovery is deliberately isolated there because it changes datastore membership.
+
+## Lost embedded-etcd quorum recovery
+
+Option 7 is a disaster-recovery workflow for a specific failure: an embedded-etcd manager still has its local datastore, but the cluster can no longer reach a majority of its manager members. It is not a general K3s repair and it is not offered automatically by option 6.
+
+Embedded etcd requires a majority of managers to make progress. A two-manager cluster requires both managers. If either one disappears, the remaining manager cannot form quorum. Build to three managers before testing failures because a three-manager cluster can tolerate one unavailable manager. Joining a second manager is only an intermediate deployment state, not HA.
+
+Use option 7 only when the missing manager or managers cannot be returned with their current datastore. If they can be brought back safely, restoring the original quorum is preferable to resetting membership. Before selecting recovery, power off or isolate every other former manager. An old manager must never reconnect using its pre-reset `/var/lib/rancher/k3s/server/db` data.
+
+The workflow refuses to reset unless all of these conditions are true:
+
+- The machine has the K3s server service and local embedded-etcd member data.
+- The protected K3sDeploy state file is present and no external datastore configuration is detected.
+- The Kubernetes readiness endpoint is unavailable.
+- Recent K3s service logs contain a strong lost-quorum pattern, such as failure to publish the local member through Raft with a deadline exceeded error.
+- The managed K3s configuration can be converted unambiguously to a single-member configuration.
+- The local filesystem has enough room for the current protected state plus 100 MiB of backup headroom.
+- No prior reset-completion flag indicates that the reset has already run.
+- The operator types the exact confirmation `RESET ETCD TO HOSTNAME`. The `--yes` flag cannot bypass it.
+
+After confirmation, K3sDeploy:
+
+1. Stops K3s so the local datastore copy is consistent.
+2. Creates and verifies a root-only archive under `/var/lib/rancher/k3s/server/etcd-recovery/`. This archive contains tokens and private keys and must be protected.
+3. Preserves the accepted node, networking, TLS SAN, and component settings while removing old join-server and join-token settings.
+4. Runs `k3s server --cluster-reset` once without a snapshot, making the current manager the sole etcd member.
+5. Starts K3s normally and verifies that the API, local node, control-plane role, and etcd role return.
+6. Deletes stale Kubernetes Node objects only for other etcd-labelled managers so manager DaemonSets can converge. Worker Node objects and Longhorn node records are not deleted.
+7. Runs the normal health report and prints the required rebuild and rejoin order.
+
+If K3s already recorded reset completion but the normal service was not restarted, option 7 enters resume mode and requires `RESUME ETCD ON HOSTNAME`. It starts and verifies K3s without running the reset again.
+
+After recovery, review Longhorn volume health, replica placement, and stale Longhorn node records before deleting anything storage-related. Restore each former manager from a clean pre-join snapshot or rebuild it. If an experienced operator deliberately reuses its installation, the old `/var/lib/rancher/k3s/server/db` must be removed before it joins the recovered cluster. Join manager two and then manager three one at a time, validating after each join. Do not treat the recovered one-member or intermediate two-member control plane as highly available.
+
+This workflow resets membership from the surviving manager's current data. It does not restore an etcd snapshot, recover application data that is already absent, or reconcile a rolled-back Longhorn disk. Virtual-machine snapshots taken at different times are not a coordinated cluster backup. Maintain K3s etcd snapshots and application backups outside the cluster. See the [official K3s snapshot and restore documentation](https://docs.k3s.io/cli/etcd-snapshot) and [embedded-etcd HA guidance](https://docs.k3s.io/datastore/ha-embedded).
 
 After any successful menu workflow, K3sDeploy prints an action-specific completion summary, the final health counts, the log location, and exits normally. A workflow that stops safely because of an invalid input or system condition returns to the menu so the operator can correct it without downloading or starting the installer again.
 
@@ -352,7 +388,7 @@ After any successful menu workflow, K3sDeploy prints an action-specific completi
 - Existing partitions, filesystems, and mounted disks are rejected by dedicated-disk mode.
 - Join tokens are read silently and never written to logs or general state.
 - `/etc/k3s-bootstrap/config` stores non-secret installation intent with mode `0600`.
-- There is no general cluster reset or uninstall mode.
+- Embedded-etcd reset exists only in the guarded option-7 disaster-recovery workflow. There is no general reset or uninstall shortcut.
 
 ## MetalLB and Traefik
 

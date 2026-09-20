@@ -27,6 +27,8 @@ source "$SCRIPT_DIR/lib/nfs.sh"
 source "$SCRIPT_DIR/lib/updates.sh"
 # shellcheck source=lib/validation.sh
 source "$SCRIPT_DIR/lib/validation.sh"
+# shellcheck source=lib/etcd-recovery.sh
+source "$SCRIPT_DIR/lib/etcd-recovery.sh"
 trap 'on_error $LINENO' ERR
 trap cleanup_join_check EXIT
 
@@ -34,10 +36,10 @@ usage(){ cat <<EOF
 K3sDeploy Installer $VERSION
 Usage: ./k3s-bootstrap.sh [--dry-run] [--verbose] [--yes] [--color|--no-color] [--plain-menu] [--help] [--version]
 
-Interactive modes: create first manager, join manager, join worker, promote worker, validate, safe repair.
+Interactive modes: create first manager, join manager, join worker, promote worker, validate, safe repair, lost-quorum recovery.
 --dry-run  Show intended host changes (cluster queries may still be read-only)
 --verbose  Show commands as they run (secret-bearing commands remain redacted)
---yes      Accept ordinary confirmations, never bypasses exact disk confirmation
+--yes      Accept ordinary confirmations, never bypasses exact destructive confirmation
 --color    Force terminal colours even when the NO_COLOR variable is set
 --no-color Disable terminal colours, interactive arrow-key menus remain enabled
 --plain-menu Use numbered prompts instead of the interactive arrow-key selector
@@ -549,6 +551,7 @@ show_main_menu(){
     'Upgrade this worker to manager - control-plane + etcd' \
     'Validate this node and cluster - read only' \
     'Repair safe local differences - asks before changes' \
+    'Recover lost embedded-etcd quorum - disaster recovery' \
     'Exit'
 }
 workflow_completion_summary(){
@@ -585,6 +588,13 @@ workflow_completion_summary(){
         '  Result: safe-repair checks and any repairs you explicitly confirmed completed.' \
         '  Validation: the final health report above is the post-repair result. Option 5 does not need to be run again.'
       ;;
+    7)
+      printf '%s\n' \
+        '  Result: this manager recovered as the sole embedded-etcd member.' \
+        "  Backup: ${ETCD_RECOVERY_BACKUP:-an earlier reset was resumed, no new backup was created}." \
+        "  Removed manager Node objects: ${ETCD_RECOVERY_REMOVED_NODES:-none}." \
+        '  Next: clean or rebuild old managers, then join manager two and manager three one at a time.'
+      ;;
   esac
   printf '  Health: %s failed check(s), %s warning(s), %s untested check(s).\n' \
     "${VALIDATION_FAILURES:-0}" "${VALIDATION_WARNINGS:-0}" "${VALIDATION_NOT_TESTED:-0}"
@@ -604,7 +614,7 @@ dispatch_action(){
     return
   fi
   require_privileges
-  [[ $action =~ ^[4-6]$ ]] && load_state
+  [[ $action =~ ^[4-7]$ ]] && load_state
   if [[ $action =~ ^[1-3]$ ]] && { [[ $K3S_INSTALLED == yes ]] || as_root_capture test -e "$CONFIG_FILE" || systemctl is-active --quiet k3s || systemctl is-active --quiet k3s-agent; }; then
     die 'Existing K3s state detected. Refusing a fresh installation. Choose validation or safe repair instead.'
   fi
@@ -615,6 +625,7 @@ dispatch_action(){
     4) promote_agent;;
     5) phase 1 1 'Running read-only node and cluster validation'; validate_cluster;;
     6) phase 1 1 'Checking and offering only safe repairs'; safe_repair;;
+    7) recover_embedded_etcd_quorum;;
   esac
 }
 run_menu_action(){
@@ -635,8 +646,13 @@ run_menu_action(){
   set -e
   trap 'on_error $LINENO' ERR
   if ((rc != 0)); then
-    warn "This workflow stopped safely (exit $rc). No later phases were run."
-    info 'Review the message above, correct the input or system condition, then choose an installer option again.'
+    if [[ $action == 7 ]]; then
+      error "The disaster-recovery workflow stopped (exit $rc). Read the recovery messages above before taking another action."
+      info 'Do not run a manual cluster reset or repeatedly retry commands. Choosing option 7 again will detect a completed reset and resume instead of repeating it.'
+    else
+      warn "This workflow stopped safely (exit $rc). No later phases were run."
+      info 'Review the message above, correct the input or system condition, then choose an installer option again.'
+    fi
   else
     LAST_WORKFLOW_SUCCEEDED=true
     ok 'The requested workflow completed and K3sDeploy is closing normally.'
@@ -653,8 +669,8 @@ main(){
     basic_host_sanity
     announce_existing_k3s
     show_main_menu action
-    [[ $action == 7 ]] && return 0
-    if [[ ! $action =~ ^[1-6]$ ]]; then warn 'Invalid selection. Choose a number from 1 to 7.'; continue; fi
+    [[ $action == 8 ]] && return 0
+    if [[ ! $action =~ ^[1-7]$ ]]; then warn 'Invalid selection. Choose a number from 1 to 8.'; continue; fi
     run_menu_action "$action"
     $LAST_WORKFLOW_SUCCEEDED && return 0
   done
