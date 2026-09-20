@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Replace the README cover with the clearer K3sDeploy artwork.
 - Clarify that the validated MetalLB pin will be updated after a patched stable
   release is published, and explain why the installer does not follow a floating
   `latest` version.
