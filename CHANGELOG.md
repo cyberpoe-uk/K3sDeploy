@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Remove kube-vip's unnecessary `/proc/sys/net` host mount, which current K3s/containerd/runc combinations can reject with `StartError` before the container starts.
+- Detect terminal kube-vip startup failures during rollout and print the current termination reason, exit code, logs, and pod events instead of waiting silently for five minutes.
 - Run a counted health summary automatically after safe repair, explain that it replaces a second option-5 run, and offer an optional self-cleaning Longhorn provisioning/persistence test.
 - Treat an unready kube-vip DaemonSet or unreachable API VIP as a failed health check, offer a pinned-manifest repair, wait for rollout readiness, and use current kube-vip address/subnet fields with control-plane label affinity.
 - Validate MetalLB controller, speaker, address-pool, and advertisement readiness instead of checking only that objects exist.

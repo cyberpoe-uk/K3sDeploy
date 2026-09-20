@@ -93,6 +93,13 @@ assert_ok grep -q 'name: address' "$ROOT/templates/kube-vip/kube-vip.yaml"
 assert_ok grep -q 'name: vip_subnet' "$ROOT/templates/kube-vip/kube-vip.yaml"
 assert_bad grep -q 'name: vip_cidr' "$ROOT/templates/kube-vip/kube-vip.yaml"
 assert_bad grep -q 'name: vip_address' "$ROOT/templates/kube-vip/kube-vip.yaml"
+assert_bad grep -q '/proc/sys/net' "$ROOT/templates/kube-vip/kube-vip.yaml"
+assert_bad grep -q 'proc-net' "$ROOT/templates/kube-vip/kube-vip.yaml"
+source "$ROOT/lib/kube-vip.sh"
+assert_ok kube_vip_failure_is_terminal CrashLoopBackOff StartError 1
+assert_ok kube_vip_failure_is_terminal CreateContainerConfigError '' 0
+assert_bad kube_vip_failure_is_terminal CrashLoopBackOff Error 4
+assert_ok kube_vip_failure_is_terminal CrashLoopBackOff Error 5
 k3s_local_installation_present(){ return 1; }
 fresh_report=$(validate_cluster)
 assert_ok grep -Eq '^K3s service[[:space:]]+MISSING' <<<"$fresh_report"

@@ -61,8 +61,3 @@ spec:
         - {name: vip_leaseduration, value: "5"}
         - {name: vip_renewdeadline, value: "3"}
         - {name: vip_retryperiod, value: "1"}
-        volumeMounts:
-        - {name: proc-net, mountPath: /proc/sys/net}
-      volumes:
-      - name: proc-net
-        hostPath: {path: /proc/sys/net, type: Directory}

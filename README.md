@@ -324,7 +324,7 @@ Option 5 produces a read-only health report covering the OS, network, K3s servic
 
 If a node created by an older K3sDeploy release still exposes the local-path provisioner while Longhorn, NFS, or external storage is selected, validation reports a warning instead of deleting or reconfiguring potentially used storage automatically.
 
-Option 6 offers only narrow repairs such as starting an existing stopped service, installing a required storage client, repairing the managed kube-vip DaemonSet, or continuing a saved MetalLB, Longhorn, or NFS CSI installation that stopped partway through. It asks before reconciling a missing add-on. Repair always runs the same health report as option 5 afterward and explains that a second manual validation run is unnecessary. When Longhorn is selected and no failed health checks remain, it offers an optional functional storage test. On a clean node it explains that there is nothing to repair and points to installation options 1–3; it never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
+Option 6 offers only narrow repairs such as starting an existing stopped service, installing a required storage client, repairing the managed kube-vip DaemonSet, or continuing a saved MetalLB, Longhorn, or NFS CSI installation that stopped partway through. It asks before reconciling a missing add-on. kube-vip repair first waits for K3s to accept the current template, then detects terminal container startup failures and prints the termination reason, exit code, logs, and pod events without waiting through the full rollout timeout. Repair always runs the same health report as option 5 afterward and explains that a second manual validation run is unnecessary. When Longhorn is selected and no failed health checks remain, it offers an optional functional storage test. On a clean node it explains that there is nothing to repair and points to installation options 1–3; it never attempts to start a nonexistent service. It does not reset etcd, recreate cluster identity, delete workloads, or overwrite ambiguous configuration automatically.
 
 ## Safety and idempotency
 
@@ -389,8 +389,11 @@ systemctl status k3s-agent
 journalctl -u k3s
 sudo k3s kubectl get nodes -o wide
 sudo k3s kubectl get pods -A
+sudo k3s kubectl -n kube-system describe pod -l app=kube-vip
 findmnt /var/lib/longhorn
 ```
+
+K3sDeploy releases before v0.2.8 could create a kube-vip DaemonSet that mounted the host's `/proc/sys/net`. Some current container runtimes reject that procfs bind mount with `StartError` and exit code `128`. Run option 6 with v0.2.8 or newer to replace that template safely; kube-vip uses host networking and the `NET_ADMIN` and `NET_RAW` capabilities without that mount.
 
 An unauthenticated HTTP `401 Unauthorized` only means the API endpoint answered. The installer uses authenticated Kubernetes requests for health decisions. Never delete `/var/lib/rancher` or `/var/lib/longhorn` as a troubleshooting shortcut.
 
