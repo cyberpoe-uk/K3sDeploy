@@ -14,6 +14,21 @@ TEST_IP=
 prompt_ipv4 TEST_IP 'Test address' <<< $'not-an-ip\n10.20.30.40'
 assert_eq "$TEST_IP" 10.20.30.40
 
+TOKEN_SHAPED_INPUT='K10examplehash::server:examplecredential'
+token_output_file=$(mktemp -t k3sdeploy-token-address-XXXXXX)
+prompt_ipv4 TEST_IP 'Token safety test' <<< "$TOKEN_SHAPED_INPUT
+10.20.30.41" >"$token_output_file"
+token_address_output=$(<"$token_output_file")
+rm -f "$token_output_file"
+assert_eq "$TEST_IP" 10.20.30.41
+if grep -Fq "$TOKEN_SHAPED_INPUT" <<<"$token_address_output"; then
+  printf 'FAIL token-shaped input was repeated in output\n'
+  ((++fail))
+else
+  ((++pass))
+fi
+assert_ok grep -q 'rotate it' <<<"$token_address_output"
+
 TEST_HOSTNAME=
 prompt_hostname TEST_HOSTNAME 'Test hostname' <<< $'bad_name\nNode-Three'
 assert_eq "$TEST_HOSTNAME" node-three
@@ -32,6 +47,23 @@ API_VIP=
 collect_new_cluster_vip <<< $'10.10.10.100\n10.10.10.105\n'
 assert_eq "$API_VIP" 10.10.10.105
 assert_eq "$VIP_CHECKS" 2
+
+port_reachable(){ return 0; }
+verify_existing_cluster_token(){ [[ $1 == server && $2 == test-server-token ]]; }
+join_output_file=$(mktemp -t k3sdeploy-join-access-XXXXXX)
+collect_join_access server <<< $'10.10.10.105\ntest-server-token' >"$join_output_file"
+join_access_output=$(<"$join_output_file")
+rm -f "$join_output_file"
+assert_eq "$API_VIP" 10.10.10.105
+assert_eq "$JOIN_TOKEN" test-server-token
+endpoint_line=$(grep -n 'API endpoint' <<<"$join_access_output" | cut -d: -f1)
+token_help_line=$(grep -n 'retrieve the server token' <<<"$join_access_output" | cut -d: -f1)
+if [[ $endpoint_line =~ ^[0-9]+$ && $token_help_line =~ ^[0-9]+$ ]] && ((endpoint_line < token_help_line)); then
+  ((++pass))
+else
+  printf 'FAIL token instructions appeared before API VIP verification\n'
+  ((++fail))
+fi
 
 configure_advanced_profile <<< $'3\ny\n4'
 assert_eq "$INSTALL_PROFILE" advanced
@@ -131,6 +163,25 @@ kubectl_local(){
     'worker-3|True|True|false'
 }
 assert_eq "$(longhorn_storage_node_count)" 2
+
+WAITED_ADDONS=
+wait_kube_vip(){ WAITED_ADDONS+=vip,; }
+wait_metallb_ready(){ WAITED_ADDONS+=metallb,; }
+wait_longhorn_ready_on_node(){ WAITED_ADDONS+=longhorn; }
+LOAD_BALANCER_MODE=metallb
+STORAGE_PROVIDER=longhorn
+DRY_RUN=false
+wait_for_joined_node_addons true
+assert_eq "$WAITED_ADDONS" vip,metallb,longhorn
+
+VALIDATION_FAILURES=0
+assert_ok require_healthy_installation
+if (VALIDATION_FAILURES=1; require_healthy_installation); then
+  printf 'FAIL unhealthy installation was reported as successful\n'
+  ((++fail))
+else
+  ((++pass))
+fi
 
 dispatch_action(){ return 23; }
 assert_ok run_menu_action 1

@@ -100,6 +100,16 @@ assert_eq "$(printf '%s\n' '/dev/dm-0 lvm' '└─/dev/sda3 part' '  └─/dev/
 assert_eq "$(printf '  ubuntu-vg | /dev/dm-0  \n' | parse_root_lvm_vg /dev/dm-0)" ubuntu-vg
 assert_bad parse_root_lvm_vg /dev/dm-0 <<< 'other-vg|/dev/dm-1'
 assert_eq "$(printf '  <64424509440.00\n' | parse_lvm_bytes)" 64424509440
+LONGHORN_NODE_TEST_STATUS='True|True|true'
+kubectl_local(){
+  case "$*" in
+    '-n longhorn-system get nodes.longhorn.io k3s-test -o jsonpath='*) printf '%s' "$LONGHORN_NODE_TEST_STATUS";;
+    *) return 1;;
+  esac
+}
+assert_ok longhorn_node_ready k3s-test
+LONGHORN_NODE_TEST_STATUS='True|False|true'
+assert_bad longhorn_node_ready k3s-test
 parted_sample='BYT;
 /dev/sda:536870912000B:scsi:512:4096:gpt:Example Disk:;
 :17408B:1048575B:1031168B:free;

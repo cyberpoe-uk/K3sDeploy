@@ -10,6 +10,24 @@ ensure_nfs_client(){
   command -v mount.nfs >/dev/null 2>&1 || die "$package was installed, but mount.nfs is still unavailable."
 }
 
+wait_nfs_csi_ready(){
+  $DRY_RUN && return 0
+  local scope=${1:-all}
+  if [[ $scope == all ]]; then
+    info 'Waiting up to ten minutes for the NFS CSI controller to become ready.'
+    if ! kubectl_local -n kube-system rollout status deploy/csi-nfs-controller --timeout=600s; then
+      kubectl_local -n kube-system get pods -o wide 2>/dev/null || true
+      die 'The NFS CSI controller did not become ready within ten minutes.'
+    fi
+  fi
+  info 'Waiting up to ten minutes for every NFS CSI node pod to become ready.'
+  if ! kubectl_local -n kube-system rollout status daemonset/csi-nfs-node --timeout=600s; then
+    kubectl_local -n kube-system get pods -l app=csi-nfs-node -o wide 2>/dev/null || true
+    die 'The NFS CSI driver did not become ready on every eligible node within ten minutes.'
+  fi
+  ok 'NFS CSI controller and node pods are ready'
+}
+
 verify_nfs_share(){
   local test_mount write_probe
   ensure_nfs_client
@@ -51,8 +69,7 @@ install_nfs_csi(){
   for manifest in rbac-csi-nfs.yaml csi-nfs-driverinfo.yaml csi-nfs-controller.yaml csi-nfs-node.yaml; do
     kubectl_local apply -f "$base/$manifest"
   done
-  kubectl_local -n kube-system rollout status deploy/csi-nfs-controller --timeout=600s
-  kubectl_local -n kube-system rollout status daemonset/csi-nfs-node --timeout=600s
+  wait_nfs_csi_ready all
   storage_class=$(render_nfs_storageclass)
   printf '%s' "$storage_class" | kubectl_local apply -f -
   ok "NFS CSI storage is configured for $NFS_SERVER:$NFS_EXPORT"

@@ -10,6 +10,24 @@ wait_metallb_webhook(){
   ok "MetalLB webhook endpoint is ready at $address"
 }
 
+wait_metallb_ready(){
+  $DRY_RUN && return 0
+  local scope=${1:-all}
+  if [[ $scope == all ]]; then
+    info 'Waiting up to five minutes for the MetalLB controller to become ready.'
+    if ! kubectl_local -n metallb-system rollout status deploy/controller --timeout=300s; then
+      kubectl_local -n metallb-system get pods -o wide 2>/dev/null || true
+      die 'The MetalLB controller did not become ready within five minutes.'
+    fi
+  fi
+  info 'Waiting up to five minutes for every MetalLB speaker pod to become ready.'
+  if ! kubectl_local -n metallb-system rollout status daemonset/speaker --timeout=300s; then
+    kubectl_local -n metallb-system get pods -o wide 2>/dev/null || true
+    die 'MetalLB did not become ready on every eligible node within five minutes.'
+  fi
+  ok 'MetalLB speaker pods are ready on every eligible node'
+}
+
 apply_metallb_config(){
   local cfg=$1 attempt output=
   for attempt in {1..12}; do
@@ -27,8 +45,7 @@ apply_metallb_config(){
 install_metallb(){
   local cfg
   kubectl_local apply -f "https://raw.githubusercontent.com/metallb/metallb/$METALLB_VERSION/config/manifests/metallb-native.yaml"
-  kubectl_local -n metallb-system rollout status deploy/controller --timeout=300s
-  kubectl_local -n metallb-system rollout status daemonset/speaker --timeout=300s
+  wait_metallb_ready all
   wait_metallb_webhook
   cfg=$(sed -e "s/__POOL_START__/$POOL_START/g" -e "s/__POOL_END__/$POOL_END/g" "$PROJECT_ROOT/templates/metallb/pool.yaml")
   apply_metallb_config "$cfg"

@@ -217,7 +217,11 @@ Run option 1 on the first manager. The installer:
 6. Installs kube-vip and any supported load-balancer and storage components selected in the profile.
 7. Runs a final health report.
 
-Run option 2 on manager two and manager three, one at a time. Enter the exact API VIP created by option 1 and paste the full secure server token from `sudo cat /var/lib/rancher/k3s/server/token` on a healthy manager. Before collecting hostname or storage choices, K3sDeploy verifies the cluster CA and authenticates against the existing manager. The token is never echoed or written to the general installer state file.
+Run option 2 on manager two and manager three, one at a time. K3sDeploy asks for the existing API VIP first. After confirming that the API is reachable, it explains how to retrieve the full secure server token with `sudo cat /var/lib/rancher/k3s/server/token` on a healthy manager and opens a hidden token field. Before collecting hostname or storage choices, K3sDeploy verifies the cluster CA and authenticates against the existing manager. The token is never echoed or written to the general installer state file.
+
+Treat the server token as a cluster-administrator secret. If it is accidentally pasted into a visible prompt, terminal recording, issue, or chat, rotate it before relying on the cluster in production. Follow the [official K3s server-token rotation procedure](https://docs.k3s.io/cli/token#k3s-token-rotate), update and restart every server or agent that originally joined with the old token, and retain the old token with any older datastore snapshot that still requires it.
+
+After K3s reports the new node Ready, K3sDeploy waits for the existing kube-vip, MetalLB, and selected storage workloads to expand onto that node. Final validation starts only after those managed add-ons are ready, preventing normal startup time from being reported as a failure.
 
 Run option 3 on remaining workers. Cluster-wide components are not reinstalled. The installer prepares local prerequisites and waits until the worker is registered and Ready.
 
@@ -227,7 +231,7 @@ This section applies when Longhorn is selected. All Longhorn storage modes expos
 
 ### Option 1: shared root filesystem
 
-This is the simplest choice. It is permitted only when root is ext4 or XFS, at least 120 GiB total, and at least 60 GiB free.
+This is the simplest choice, but it is not recommended. Longhorn and the operating system consume capacity from the same filesystem, so unexpected storage growth can put the node and its workloads under pressure. They also share the same physical disk failure domain. The option is permitted only when root is ext4 or XFS, at least 120 GiB total, and at least 60 GiB free.
 
 The storage menu marks this choice `Unavailable` when those requirements are not met, includes the reason in brackets, greys it out, and skips it during selection. The size of the underlying disk does not make a smaller root filesystem eligible automatically.
 
@@ -239,11 +243,11 @@ Minimum available percentage:    25%
 Over-provisioning:               100%
 ```
 
-The 30% reservation is a Longhorn scheduling rule, not a filesystem quota. The operating system and Longhorn still consume the same real free space. Use a separate partition or disk when a hard capacity boundary is required.
+The 30% reservation is a Longhorn scheduling rule, not a filesystem quota. The operating system and Longhorn still consume the same real free space. Prefer option 2 or option 3 for a dedicated capacity boundary.
 
 ### Option 2: separate storage on the OS disk (LVM or partition)
 
-The installer can guide creation of separate Longhorn storage without resizing existing filesystems. It understands both ordinary partition layouts and common Linux LVM layouts.
+This is a recommended choice when a separate physical or virtual disk is not available. It gives Longhorn a separate filesystem and protects root capacity without resizing existing filesystems. It still shares the OS disk, so it does not protect a Longhorn replica from failure of that physical or virtual disk. The installer understands both ordinary partition layouts and common Linux LVM layouts.
 
 Seeing a smaller root filesystem and a larger OS disk is not an error. For example, a Linux installer may place a 59 GiB root logical volume on a 120 GiB physical or virtual disk while the rest remains free inside the LVM volume group. That space is not visible to `parted` as unallocated disk space, so K3sDeploy checks both layers separately.
 
@@ -277,7 +281,7 @@ If partition creation succeeds but Linux cannot expose the new device immediatel
 
 ### Option 3: separate disk (physical or virtual)
 
-This is the recommended choice for important data. The installer displays a numbered list containing only disks that:
+This is the recommended choice for the strongest storage isolation. Longhorn capacity is independent of the operating-system disk, and failure of the Longhorn disk does not directly consume or damage the root filesystem. The installer displays a numbered list containing only disks that:
 
 - Are not the OS disk.
 - Have no partitions.

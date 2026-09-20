@@ -40,15 +40,56 @@ longhorn_readiness_summary(){
   printf 'driver %s, UI %s, managers %s (desired|ready)' "$driver" "$ui" "$manager"
 }
 
-install_longhorn(){ ensure_iscsi; kubectl_local apply -f "https://raw.githubusercontent.com/longhorn/longhorn/$LONGHORN_VERSION/deploy/longhorn.yaml"; kubectl_local -n longhorn-system rollout status deploy/longhorn-driver-deployer --timeout=600s; kubectl_local -n longhorn-system rollout status deploy/longhorn-ui --timeout=600s; kubectl_local -n longhorn-system rollout status daemonset/longhorn-manager --timeout=600s; set_longhorn_setting default-data-path "$LONGHORN_PATH"; set_longhorn_setting storage-minimal-available-percentage "$LONGHORN_MIN_AVAILABLE_PERCENT"; set_longhorn_setting storage-over-provisioning-percentage "$LONGHORN_OVERPROVISIONING_PERCENT"; set_longhorn_setting storage-reserved-percentage-for-default-disk "$LONGHORN_ROOT_RESERVED_PERCENT"; set_longhorn_setting default-replica-count "$LONGHORN_REPLICAS"; set_longhorn_setting default-data-locality best-effort; set_longhorn_setting replica-auto-balance least-effort; local sc; sc=$(sed -e "s#__PATH__#$LONGHORN_PATH#g" -e "s/__REPLICAS__/$LONGHORN_REPLICAS/g" "$PROJECT_ROOT/templates/longhorn/storageclass.yaml"); printf '%s' "$sc" | kubectl_local apply -f -; }
+longhorn_node_status(){
+  local node=$1
+  kubectl_local -n longhorn-system get nodes.longhorn.io "$node" \
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"|"}{.status.conditions[?(@.type=="Schedulable")].status}{"|"}{.spec.allowScheduling}' 2>/dev/null
+}
+
+longhorn_node_ready(){
+  local status ready schedulable scheduling_allowed
+  status=$(longhorn_node_status "$1") || return 1
+  IFS='|' read -r ready schedulable scheduling_allowed <<<"$status"
+  [[ $ready == True && $schedulable == True && $scheduling_allowed == true ]]
+}
+
+wait_longhorn_ready_on_node(){
+  $DRY_RUN && return 0
+  local scope=${1:-node} node=${DESIRED_HOSTNAME:-$(short_hostname)} end
+  if [[ $scope == all ]]; then
+    info 'Allow up to ten minutes for each Longhorn deployment to become ready.'
+    if ! kubectl_local -n longhorn-system rollout status deploy/longhorn-driver-deployer --timeout=600s ||
+       ! kubectl_local -n longhorn-system rollout status deploy/longhorn-ui --timeout=600s; then
+      kubectl_local -n longhorn-system get pods -o wide 2>/dev/null || true
+      die 'A Longhorn deployment did not become ready within its ten-minute timeout.'
+    fi
+  fi
+  info 'Waiting up to ten minutes for every Longhorn manager pod to become ready.'
+  if ! kubectl_local -n longhorn-system rollout status daemonset/longhorn-manager --timeout=600s; then
+    kubectl_local -n longhorn-system get pods -o wide 2>/dev/null || true
+    die 'Longhorn managers did not become ready on every eligible node within ten minutes.'
+  fi
+  end=$((SECONDS+180))
+  info "Waiting up to three minutes for Longhorn node $node to become ready and schedulable."
+  until longhorn_node_ready "$node"; do
+    if ((SECONDS >= end)); then
+      kubectl_local -n longhorn-system get nodes.longhorn.io "$node" -o wide 2>/dev/null || true
+      die "Longhorn node $node did not become ready and schedulable within three minutes."
+    fi
+    sleep 5
+  done
+  ok "Longhorn workloads are ready and node $node is schedulable"
+}
+
+install_longhorn(){ ensure_iscsi; kubectl_local apply -f "https://raw.githubusercontent.com/longhorn/longhorn/$LONGHORN_VERSION/deploy/longhorn.yaml"; wait_longhorn_ready_on_node all; set_longhorn_setting default-data-path "$LONGHORN_PATH"; set_longhorn_setting storage-minimal-available-percentage "$LONGHORN_MIN_AVAILABLE_PERCENT"; set_longhorn_setting storage-over-provisioning-percentage "$LONGHORN_OVERPROVISIONING_PERCENT"; set_longhorn_setting storage-reserved-percentage-for-default-disk "$LONGHORN_ROOT_RESERVED_PERCENT"; set_longhorn_setting default-replica-count "$LONGHORN_REPLICAS"; set_longhorn_setting default-data-locality best-effort; set_longhorn_setting replica-auto-balance least-effort; local sc; sc=$(sed -e "s#__PATH__#$LONGHORN_PATH#g" -e "s/__REPLICAS__/$LONGHORN_REPLICAS/g" "$PROJECT_ROOT/templates/longhorn/storageclass.yaml"); printf '%s' "$sc" | kubectl_local apply -f -; }
 validate_longhorn(){
   if ! kubectl_local get ns longhorn-system >/dev/null 2>&1; then report Longhorn FAIL 'namespace not found'; return 1; fi
   if ! longhorn_installation_ready; then report Longhorn FAIL "workloads are not ready: $(longhorn_readiness_summary)"; return 1; fi
   local node=${DESIRED_HOSTNAME:-$(short_hostname)}
-  if kubectl_local -n longhorn-system get nodes.longhorn.io "$node" >/dev/null 2>&1; then
-    report Longhorn OK 'local node registered'
+  if longhorn_node_ready "$node"; then
+    report Longhorn OK 'local node registered, ready and schedulable'
   else
-    report Longhorn FAIL 'local node is not registered'
+    report Longhorn FAIL "local node is not ready and schedulable: $(longhorn_node_status "$node" || printf 'not registered')"
     return 1
   fi
 }

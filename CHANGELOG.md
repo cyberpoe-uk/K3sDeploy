@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Ask for the existing API VIP before showing token-retrieval instructions, avoid repeating a token pasted into a visible address field, and warn that an exposed token should be rotated.
+- Prepare storage clients before a node joins, then wait for kube-vip, MetalLB, and the selected storage add-on to become ready on the new node before final validation. Longhorn must also report the new node ready and schedulable.
+- Prevent installation and promotion workflows from reporting success when final health validation still has failed checks.
+- Shorten unavailable storage labels so their complete bracketed reasons remain visible in an 80-column terminal.
 - Make unavailable storage choices grey and non-selectable, include the reason in square brackets, and shorten guided LVM or partition confirmation to `CREATE`.
 - Replace the long dash and prose semicolon styles with plain punctuation in installer output and documentation.
 - Stop repeatedly offering an already-completed Longhorn repair by comparing each workload's available replicas with its configured desired count instead of assuming every deployment has exactly one replica.

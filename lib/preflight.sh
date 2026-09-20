@@ -50,7 +50,7 @@ EOF
   getent hosts github.com >/dev/null 2>&1 || warn "DNS/internet check failed. Installation downloads will fail"
   curl -fsI --max-time 5 https://get.k3s.io >/dev/null 2>&1 || warn "HTTPS connectivity to get.k3s.io could not be confirmed"
   [[ $TIME_SYNC == yes ]] || warn "System clock is not confirmed synchronized"
-  [[ $SWAP_STATUS == disabled ]] || warn "Swap is enabled. Monitor memory pressure and confirm your Kubernetes swap policy before production use."
+  [[ $SWAP_STATUS == disabled ]] || warn "Swap is enabled. Confirm your Kubernetes swap policy before production use."
 }
 announce_existing_k3s(){
   local server_state=not-installed agent_state=not-installed config_state=not-detected

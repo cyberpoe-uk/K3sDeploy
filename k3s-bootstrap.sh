@@ -174,6 +174,31 @@ install_cluster_storage(){
     *) skip "No cluster storage add-on selected ($STORAGE_PROVIDER)";;
   esac
 }
+prepare_storage_client(){
+  case $STORAGE_PROVIDER in
+    longhorn) ensure_iscsi;;
+    nfs) ensure_nfs_client;;
+    *) skip "No managed storage client is required ($STORAGE_PROVIDER selected)";;
+  esac
+}
+wait_for_joined_node_addons(){
+  local include_kube_vip=${1:-false}
+  $DRY_RUN && { change 'Would wait for managed cluster add-ons to become ready on this node'; return 0; }
+  $include_kube_vip && wait_kube_vip
+  if use_metallb; then wait_metallb_ready node; else skip "MetalLB readiness wait omitted ($LOAD_BALANCER_MODE selected)"; fi
+  if use_longhorn; then
+    wait_longhorn_ready_on_node node
+  elif use_nfs; then
+    wait_nfs_csi_ready node
+  else
+    skip "Managed storage readiness wait omitted ($STORAGE_PROVIDER selected)"
+  fi
+}
+require_healthy_installation(){
+  if ((${VALIDATION_FAILURES:-0} > 0)); then
+    die "The planned node changes completed, but final validation found $VALIDATION_FAILURES failed check(s). K3sDeploy will not report this workflow as successful."
+  fi
+}
 valid_ip_or_die(){ validate_ipv4 "$2" || die "$1 is not a valid IPv4 address: $2"; }
 valid_hostname_or_die(){ [[ ${#1} -le 253 && $1 =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && $1 != *..* ]] || die "Invalid hostname '$1'. Use lowercase letters, numbers, dots or hyphens."; }
 prompt_ipv4(){
@@ -182,7 +207,12 @@ prompt_ipv4(){
     read -r -p "$prompt: " value
     if [[ -z $value ]]; then warn "$prompt cannot be empty, please try again."; continue; fi
     if validate_ipv4 "$value"; then printf -v "$var" '%s' "$value"; return; fi
-    warn "'$value' is not a valid IPv4 address, please try again."
+    if [[ $value == K10*::* ]]; then
+      warn 'That looks like a K3s token, not an IPv4 address. The token value will not be repeated in installer output.'
+      warn 'Because the token was entered into a visible field, rotate it before relying on this cluster in production.'
+    else
+      warn 'That is not a valid IPv4 address. Please try again.'
+    fi
   done
 }
 prompt_hostname(){
@@ -259,20 +289,24 @@ collect_join_access(){
   printf '%s\n' \
     '  Enter the exact Kubernetes API VIP created on the first manager.' \
     '  Do not enter this node address or the address of only one manager.' \
+    '  Enter the VIP first. The installer asks for the token afterward in a hidden field.' \
     '  The installer verifies the cluster and token before asking about storage.'
   printf '\n'
   token_label='K3s join token from a healthy manager (input hidden)'
   if [[ $role == server ]]; then
     token_label='K3s SERVER token from /var/lib/rancher/k3s/server/token (input hidden)'
-    info 'On a healthy manager, retrieve it with: sudo cat /var/lib/rancher/k3s/server/token'
-  else
-    info 'On a healthy manager, retrieve it with: sudo cat /var/lib/rancher/k3s/server/agent-token'
   fi
   while true; do
     prompt_ipv4 API_VIP 'Existing cluster API VIP'
     if ! port_reachable "$API_VIP" 6443; then
       warn "No K3s API answered at $API_VIP:6443. Check the existing VIP and network, then try again."
       continue
+    fi
+    ok "K3s API endpoint $API_VIP:6443 is reachable"
+    if [[ $role == server ]]; then
+      info 'On a healthy manager, retrieve the server token with: sudo cat /var/lib/rancher/k3s/server/token'
+    else
+      info 'On a healthy manager, retrieve the agent token with: sudo cat /var/lib/rancher/k3s/server/agent-token'
     fi
     printf '%s: ' "$token_label"
     read -rs JOIN_TOKEN
@@ -370,6 +404,7 @@ new_cluster(){
 
   phase 8 8 'Running final health validation'
   validate_cluster
+  require_healthy_installation
 }
 
 join_cluster(){
@@ -394,8 +429,9 @@ join_cluster(){
   section 'Final confirmation'
   confirm 'Apply this installation plan?' || { JOIN_TOKEN=; skip 'Cancelled'; return; }
 
-  phase 3 8 'Preparing storage, hostname and protected installer state'
+  phase 3 8 'Preparing storage, clients and protected installer state'
   prepare_storage_host
+  prepare_storage_client
   set_hostname_if_needed
   persist_state
 
@@ -412,12 +448,13 @@ join_cluster(){
   phase 6 8 'Checking kube-vip compatibility on this server'
   check_kube_vip_interface || warn 'kube-vip requires operator attention'
 
-  phase 7 8 'Preparing storage and checking cluster-wide services'
-  if use_longhorn; then ensure_iscsi; elif use_nfs; then ensure_nfs_client; else skip 'No managed storage host prerequisites selected'; fi
-  info 'Cluster-wide kube-vip, load balancing, Traefik and persistent storage are inspected, not reinstalled.'
+  phase 7 8 'Waiting for managed add-ons on the new manager'
+  info 'Cluster-wide add-ons are inspected and awaited, not reinstalled.'
+  wait_for_joined_node_addons true
 
   phase 8 8 'Running final health validation'
   validate_cluster
+  require_healthy_installation
   offer_longhorn_smoke
 }
 
@@ -443,8 +480,9 @@ join_agent(){
   section 'Final confirmation'
   confirm 'Apply this installation plan?' || { JOIN_TOKEN=; skip 'Cancelled'; return; }
 
-  phase 3 7 'Preparing storage, hostname and protected installer state'
+  phase 3 7 'Preparing storage, clients and protected installer state'
   prepare_storage_host
+  prepare_storage_client
   set_hostname_if_needed
   persist_state
 
@@ -457,12 +495,13 @@ join_agent(){
   phase 5 7 'Waiting for the worker node to become Ready'
   wait_agent_node
 
-  phase 6 7 'Preparing persistent-storage host prerequisites'
-  if use_longhorn; then ensure_iscsi; elif use_nfs; then ensure_nfs_client; else skip 'No managed storage host prerequisites selected'; fi
-  info 'Cluster-wide add-ons are not reinstalled on worker nodes.'
+  phase 6 7 'Waiting for managed add-ons on the new worker'
+  info 'Cluster-wide add-ons are awaited, not reinstalled on worker nodes.'
+  wait_for_joined_node_addons false
 
   phase 7 7 'Running final health validation'
   validate_cluster
+  require_healthy_installation
   offer_longhorn_smoke
 }
 promotion_backup(){ local stamp dir; stamp=$(date +%Y%m%d-%H%M%S); dir="/etc/k3s-bootstrap/promotion-backup-$stamp"; as_root install -d -m 700 "$dir"; for item in /etc/rancher/k3s/config.yaml /etc/rancher/node/password /etc/systemd/system/k3s-agent.service /etc/systemd/system/k3s-agent.service.env; do [[ -e $item ]] && as_root cp -a -- "$item" "$dir/"; done; info "Saved protected pre-promotion files in $dir"; }
@@ -492,8 +531,8 @@ promote_agent(){
   [[ -x /usr/local/bin/k3s-agent-uninstall.sh ]] || die 'Official k3s-agent-uninstall.sh was not found. No removal was attempted.'
   as_root /usr/local/bin/k3s-agent-uninstall.sh
   phase 5 7 'Installing this machine as a manager/server'; local cfg; cfg=$(render_k3s_config join "$JOIN_TOKEN"); install_k3s "$cfg" server; JOIN_TOKEN=; cfg=; NODE_ROLE=server; persist_state
-  phase 6 7 'Waiting for Ready, control-plane and etcd membership'; wait_k3s; wait_local_node; check_kube_vip_interface || warn 'kube-vip requires operator attention'; if use_longhorn; then ensure_iscsi; elif use_nfs; then ensure_nfs_client; else skip 'No managed storage host prerequisites selected'; fi
-  phase 7 7 'Running final health and quorum-oriented validation'; validate_cluster; offer_longhorn_smoke
+  phase 6 7 'Waiting for Ready, roles and managed add-ons'; wait_k3s; wait_local_node; check_kube_vip_interface || warn 'kube-vip requires operator attention'; prepare_storage_client; wait_for_joined_node_addons true
+  phase 7 7 'Running final health and quorum-oriented validation'; validate_cluster; require_healthy_installation; offer_longhorn_smoke
 }
 configure_updates_prompt(){ if ! security_updates_supported; then skip "Automatic security-update configuration is not changed on $OS_NAME. Use its native update policy."; elif confirm 'Enable security-only unattended upgrades (automatic reboot disabled)?'; then configure_updates; else skip 'Unattended upgrades unchanged'; fi; }
 load_state(){ local state_content; if [[ -r $STATE_FILE ]]; then state_content=$(<"$STATE_FILE"); elif sudo -n test -r "$STATE_FILE" 2>/dev/null; then state_content=$(sudo cat "$STATE_FILE"); else return 0; fi; while IFS='=' read -r key value; do case $key in INSTALL_PROFILE|LOAD_BALANCER_MODE|STORAGE_PROVIDER|NODE_ROLE|NODE_IP|API_VIP|POOL_START|POOL_END|STORAGE_MODE|STORAGE_DEVICE|LONGHORN_PATH|LONGHORN_DEVICE_UUID|LONGHORN_REPLICAS|NFS_SERVER|NFS_EXPORT) printf -v "$key" '%s' "$value";; esac; done <<<"$state_content"; }

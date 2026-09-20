@@ -450,7 +450,7 @@ select_os_disk_partition(){
     os_choices+=("Use an existing unused partition - ${#_existing_partitions[@]} eligible found")
     [[ $default_subchoice == 4 ]] && default_subchoice=3
   else
-    os_choices+=("${MENU_DISABLED_PREFIX}Use an existing unused partition [Unavailable - 0 eligible partitions found]")
+    os_choices+=("${MENU_DISABLED_PREFIX}Existing unused partition [Unavailable - 0 eligible partitions found]")
   fi
   os_choices+=('Return to the main storage choices')
   printf '\n  Safety: no root filesystem, logical volume, or existing partition will be shrunk or moved.\n'
@@ -569,16 +569,18 @@ Detected storage
 
 Storage guidance
 
-Root filesystem$($root_eligible || printf ' [UNAVAILABLE]')
+Root filesystem [NOT RECOMMENDED$($root_eligible || printf ' AND UNAVAILABLE')]
    Requires ext4/XFS, ${LONGHORN_ROOT_MIN_GIB} GiB total and ${LONGHORN_ROOT_MIN_AVAILABLE_GIB} GiB available.
    Detected: ${root_fstype}, ${root_gib} GiB total and ${available_gib} GiB available.
-   Longhorn reserves ${LONGHORN_ROOT_RESERVED_PERCENT}% for OS headroom, but this is not a hard quota.
+   Risk: Longhorn shares capacity and the physical failure domain with the OS.
+   Its ${LONGHORN_ROOT_RESERVED_PERCENT}% OS reservation is a scheduling rule, not a hard quota.
 
-Separate storage on the OS disk
+Separate storage on the OS disk [RECOMMENDED]
    The installer detects both physical unallocated space and free Linux LVM
    extents, recommends a size, and never shrinks or moves existing data.
+   This isolates capacity from root, but still shares the physical disk.
 
-Separate physical or virtual disk (recommended for important data)
+Separate physical or virtual disk [RECOMMENDED FOR BEST ISOLATION]
    Best isolation. SSD or NVMe is recommended. The disk must be empty.
    ${LONGHORN_DATA_RECOMMENDED_GIB} GiB is recommended.
    The ${LONGHORN_DATA_MIN_GIB} GiB installer floor is intended only for small labs.
@@ -586,19 +588,19 @@ Separate physical or virtual disk (recommended for important data)
 All separate storage is mounted by UUID at $LONGHORN_STANDARD_PATH.
 EOF
     printf '\n'
-    root_choice='Use the root filesystem - simplest'
+    root_choice='Root filesystem - simplest [Not recommended - shares OS disk]'
     if ! $root_eligible; then
       if [[ $root_fstype != ext4 && $root_fstype != xfs ]]; then
-        root_reason="requires ext4 or XFS, detected $root_fstype"
+        root_reason="needs ext4 or XFS, found $root_fstype"
       else
-        root_reason="requires ${LONGHORN_ROOT_MIN_GIB} GiB total and ${LONGHORN_ROOT_MIN_AVAILABLE_GIB} GiB available"
+        root_reason="needs ${LONGHORN_ROOT_MIN_GIB} GiB total and ${LONGHORN_ROOT_MIN_AVAILABLE_GIB} GiB free"
       fi
-      root_choice="${MENU_DISABLED_PREFIX}${root_choice} [Unavailable - $root_reason]"
+      root_choice="${MENU_DISABLED_PREFIX}Root filesystem [Unavailable - $root_reason]"
     fi
     menu_select choice 'Choose Longhorn storage' "$default_choice" \
       "$root_choice" \
-      'Create separate storage on the OS disk - guided partition or LVM' \
-      'Use a separate physical or virtual disk - best isolation'
+      'Separate OS-disk storage [Recommended - space isolation]' \
+      'Separate physical or virtual disk [Recommended - best isolation]'
     case $choice in
       1) if select_root_storage; then return; fi;;
       2) if select_os_disk_partition; then return; fi;;
