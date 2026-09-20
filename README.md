@@ -244,9 +244,11 @@ arbitrary CSI providers.
 
 Snapshot restore currently discovers local K3s snapshots. Longhorn backup-target
 configuration and complete persistent-volume restoration are not automated yet.
-MetalLB `v0.16.1` matches the validated profile but has a reported fixable gRPC
-vulnerability. Review upstream security releases and test pin changes before
-using K3sDeploy for production workloads.
+MetalLB `v0.16.1` matches the validated profile but includes a gRPC dependency
+with a reported fixable vulnerability. A patched stable MetalLB release is not
+available yet. When MetalLB publishes one, I will validate it with K3sDeploy and
+update the pinned version. K3sDeploy does not use a floating `latest` version
+because an unreviewed dependency change could make installations inconsistent.
 
 ## Development and testing
 

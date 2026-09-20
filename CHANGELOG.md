@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Clarify that the validated MetalLB pin will be updated after a patched stable
+  release is published, and explain why the installer does not follow a floating
+  `latest` version.
 - Restructure the public README around the recommended curl launcher, with repository cloning as the second installation method. Add the K3sDeploy cover image, make the fresh Ubuntu Server requirement explicit, condense operational guidance, and include an AI-assisted development disclosure.
 - Add an explicit embedded-etcd backup policy to manager installation and promotion. The recommended policy keeps five scheduled snapshots per manager and prunes each named milestone category to its newest copy. The advanced opt-out requires exact acknowledgement, disables new K3s and milestone snapshots, and preserves existing snapshot files.
 - Explain that one surviving manager can restore the control plane with its snapshot and matching token, while a surviving worker cannot. Clarify the need for protected off-node copies and the limits of uncoordinated hypervisor snapshots.
