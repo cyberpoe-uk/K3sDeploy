@@ -110,34 +110,65 @@ newest_snapshot_matching(){
     sort -t '|' -k1,1nr | awk -F'|' 'NR==1 {print $2}'
 }
 
+milestone_snapshot_name(){
+  local label=$1 timestamp=${2:-$(date -u '+%Y-%m-%d-%H%M%S')}
+  printf 'k3sdeploy-%s-%s\n' "$label" "$timestamp"
+}
+
+run_etcd_snapshot_save(){
+  local data_dir=$1 directory=$2 name=$3
+  local -a args=(
+    k3s etcd-snapshot save
+    --config /dev/null
+    --data-dir "$data_dir"
+    --dir "$directory"
+    --name "$name"
+  )
+  [[ ${ETCD_SNAPSHOT_COMPRESS:-true} == true ]] && args+=(--snapshot-compress)
+  as_root "${args[@]}"
+}
+
+run_etcd_snapshot_prune(){
+  local data_dir=$1 directory=$2 prefix=$3 retention=$4
+  as_root k3s etcd-snapshot prune \
+    --config /dev/null \
+    --data-dir "$data_dir" \
+    --dir "$directory" \
+    --name "$prefix" \
+    --snapshot-retention "$retention"
+}
+
 create_etcd_snapshot(){
-  local label=$1 directory before newest
+  local label=$1 data_dir directory prefix snapshot_name before newest
   ETCD_LAST_SNAPSHOT=
   managed_etcd_snapshots || { skip "Etcd snapshot omitted because external backup ownership is selected: k3sdeploy-$label"; return 0; }
+  prefix="k3sdeploy-$label"
+  snapshot_name=$(milestone_snapshot_name "$label")
   if $DRY_RUN; then
-    change "Would create an official K3s etcd snapshot named k3sdeploy-$label"
+    change "Would create an official K3s etcd snapshot named $snapshot_name"
     return 0
   fi
   systemd_unit_exists k3s || { skip 'Etcd snapshot omitted because this is not a manager'; return 0; }
-  as_root_capture test -d "$(k3s_data_directory)/server/db/etcd/member" || { skip 'Etcd snapshot omitted because no local embedded-etcd member was found'; return 0; }
+  data_dir=$(k3s_data_directory)
+  as_root_capture test -d "$data_dir/server/db/etcd/member" || { skip 'Etcd snapshot omitted because no local embedded-etcd member was found'; return 0; }
   as_root_capture k3s kubectl get --raw=/readyz >/dev/null 2>&1 || {
     warn 'The Kubernetes API is not ready, so K3sDeploy could not create a consistent on-demand etcd snapshot.'
     return 1
   }
   directory=$(etcd_snapshot_directory)
-  before=$(newest_snapshot_matching "$directory" "k3sdeploy-$label" || true)
-  info "Creating an official K3s etcd snapshot on this manager: k3sdeploy-$label"
-  as_root k3s etcd-snapshot save --name "k3sdeploy-$label"
-  newest=$(newest_snapshot_matching "$directory" "k3sdeploy-$label" || true)
+  before=$(newest_snapshot_matching "$directory" "$prefix" || true)
+  info "Creating an official K3s etcd snapshot on this manager: $snapshot_name"
+  run_etcd_snapshot_save "$data_dir" "$directory" "$snapshot_name"
+  newest=$(newest_snapshot_matching "$directory" "$prefix" || true)
   [[ -n $newest && $newest != "$before" ]] || die "K3s reported snapshot completion, but a new snapshot was not found in $directory."
   ETCD_LAST_SNAPSHOT=$newest
   as_root chmod 700 "$directory"
   as_root chmod 600 "$ETCD_LAST_SNAPSHOT"
   ok "Etcd snapshot saved locally at $ETCD_LAST_SNAPSHOT"
-  if as_root k3s etcd-snapshot prune --name "k3sdeploy-$label" --snapshot-retention "${ETCD_MILESTONE_RETENTION:-1}"; then
-    info "Retained the newest ${ETCD_MILESTONE_RETENTION:-1} k3sdeploy-$label milestone snapshot on this manager"
+  if run_etcd_snapshot_prune "$data_dir" "$directory" "$prefix" "${ETCD_MILESTONE_RETENTION:-1}"; then
+    info "Retained the newest ${ETCD_MILESTONE_RETENTION:-1} $prefix milestone snapshot on this manager"
   else
-    warn "The new snapshot is safe, but older k3sdeploy-$label snapshots could not be pruned automatically."
+    warn "The new snapshot is safe, but older $prefix snapshots could not be pruned automatically."
   fi
   warn 'A local snapshot shares this node failure domain. Copy snapshots and the server token to protected off-node storage.'
 }

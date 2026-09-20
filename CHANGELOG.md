@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Give milestone snapshots a readable UTC date and time in their K3s-managed
+  names. Snapshot save and prune commands now use an isolated command
+  configuration, preventing server-only settings and the configured retention
+  alias from colliding with the prune request.
 - Replace the ambiguous root-headroom warning with the current root size, free
   capacity, calculated allocation recommendation, and a precise explanation of
   which K3s files continue using root when Longhorn has separate storage.
