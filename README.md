@@ -1,7 +1,7 @@
 # K3sDeploy
 
 <p align="center">
-  <img src="assets/k3sdeploy-logo.png" alt="K3sDeploy logo" width="500">
+  <img src="assets/k3sdeploy-cover-clear.png" alt="K3sDeploy logo" width="500">
 </p>
 
 ## Build and recover a K3s cluster with guided choices
