@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.1.0 - 21-09-2026
+
+- Add a guarded, idempotent Argo CD GitOps workflow as option 9 and offer it
+  after the third recommended-profile manager becomes Ready. It requires a
+  healthy manager set, installs the pinned official HA manifest, exposes the
+  GUI through MetalLB, waits for every workload, and prints safe first-login
+  guidance without collecting GitLab credentials. Successful first installation
+  also records a bounded `argocd-ready` milestone snapshot.
+
 ## v1.0.0 - 21-09-2026
 
 - Leave scheduled embedded-etcd snapshots under native K3s defaults. K3sDeploy

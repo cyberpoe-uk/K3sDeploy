@@ -53,6 +53,7 @@ report_fresh_node(){
   report 'kube-vip' MISSING 'not installed'
   if [[ ${LOAD_BALANCER_MODE:-metallb} == metallb ]]; then report 'MetalLB' MISSING 'not installed'; else report 'MetalLB' SKIP "not selected ($LOAD_BALANCER_MODE mode)"; fi
   report 'Traefik' MISSING 'not installed'
+  report 'Argo CD' SKIP 'requires a healthy cluster with at least three managers'
   if [[ ${STORAGE_PROVIDER:-longhorn} == longhorn ]]; then report 'Longhorn' MISSING 'not installed'; else report 'Longhorn' SKIP "$STORAGE_PROVIDER storage selected"; fi
   if [[ ${STORAGE_PROVIDER:-longhorn} != longhorn ]]; then
     report open-iscsi SKIP 'Longhorn not selected'
@@ -130,6 +131,7 @@ validate_cluster(){
       fi
     fi
     if kubectl_local -n kube-system get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null | grep -q .; then report Traefik OK; else report Traefik WARN 'no external IP'; fi
+    validate_argocd || true
   fi
   if [[ ${STORAGE_PROVIDER:-longhorn} == local-path ]]; then
     report open-iscsi SKIP 'Longhorn not selected'

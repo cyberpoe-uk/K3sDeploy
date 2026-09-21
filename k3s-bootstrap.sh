@@ -25,6 +25,8 @@ source "$SCRIPT_DIR/lib/longhorn.sh"
 source "$SCRIPT_DIR/lib/nfs.sh"
 # shellcheck source=lib/updates.sh
 source "$SCRIPT_DIR/lib/updates.sh"
+# shellcheck source=lib/argocd.sh
+source "$SCRIPT_DIR/lib/argocd.sh"
 # shellcheck source=lib/validation.sh
 source "$SCRIPT_DIR/lib/validation.sh"
 # shellcheck source=lib/etcd-snapshot.sh
@@ -38,7 +40,7 @@ usage(){ cat <<EOF
 K3sDeploy Installer $VERSION
 Usage: ./k3s-bootstrap.sh [--dry-run] [--verbose] [--yes] [--color|--no-color] [--plain-menu] [--help] [--version]
 
-Interactive modes: create first manager, join manager, join worker, promote worker, validate, safe repair, quorum recovery, snapshot restore.
+Interactive modes: create first manager, join manager, join worker, promote worker, validate, repair, disaster recovery, and Argo CD GitOps setup.
 --dry-run  Show intended host changes (cluster queries may still be read-only)
 --verbose  Show commands as they run (secret-bearing commands remain redacted)
 --yes      Accept ordinary confirmations, never bypasses exact destructive confirmation
@@ -478,6 +480,7 @@ join_cluster(){
   require_healthy_installation
   create_milestone_etcd_snapshot manager-joined
   offer_longhorn_smoke
+  offer_argocd_after_manager_join
 }
 
 join_agent(){
@@ -590,6 +593,7 @@ show_main_menu(){
     'Repair safe local differences - asks before changes' \
     'Recover lost embedded-etcd quorum - disaster recovery' \
     'Restore an embedded-etcd snapshot - disaster recovery' \
+    'Install or validate Argo CD - GitOps deployment GUI' \
     'Exit'
 }
 workflow_completion_summary(){
@@ -640,6 +644,12 @@ workflow_completion_summary(){
         "  Safety backup: ${ETCD_RECOVERY_BACKUP:-an earlier restore was resumed, no new backup was created}." \
         '  Next: inspect applications and persistent data, then clean and rejoin other managers one at a time.'
       ;;
+    9)
+      printf '%s\n' \
+        '  Result: the Argo CD GitOps platform workflow completed.' \
+        "  Version: $ARGO_CD_VERSION." \
+        '  Next: log in to the GUI, change the administrator password, and connect your GitLab repository.'
+      ;;
   esac
   if [[ -n ${ETCD_LAST_SNAPSHOT:-} ]]; then
     printf '  New etcd snapshot: %s\n' "$ETCD_LAST_SNAPSHOT"
@@ -662,7 +672,7 @@ dispatch_action(){
     return
   fi
   require_privileges
-  [[ $action =~ ^[4-8]$ ]] && load_state
+  [[ $action =~ ^[4-9]$ ]] && load_state
   if [[ $action =~ ^[1-3]$ ]] && { [[ $K3S_INSTALLED == yes ]] || as_root_capture test -e "$CONFIG_FILE" || systemctl is-active --quiet k3s || systemctl is-active --quiet k3s-agent; }; then
     die 'Existing K3s state detected. Refusing a fresh installation. Choose validation or safe repair instead.'
   fi
@@ -679,6 +689,7 @@ dispatch_action(){
     6) phase 1 1 'Checking and offering only safe repairs'; safe_repair;;
     7) recover_embedded_etcd_quorum;;
     8) restore_embedded_etcd_snapshot;;
+    9) install_argocd_workflow;;
   esac
 }
 run_menu_action(){
@@ -730,8 +741,8 @@ main(){
     basic_host_sanity
     announce_existing_k3s
     show_main_menu action
-    [[ $action == 9 ]] && return 0
-    if [[ ! $action =~ ^[1-8]$ ]]; then warn 'Invalid selection. Choose a number from 1 to 9.'; continue; fi
+    [[ $action == 10 ]] && return 0
+    if [[ ! $action =~ ^[1-9]$ ]]; then warn 'Invalid selection. Choose a number from 1 to 10.'; continue; fi
     run_menu_action "$action"
     $LAST_WORKFLOW_SUCCEEDED && return 0
   done

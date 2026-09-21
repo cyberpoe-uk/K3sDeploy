@@ -18,8 +18,9 @@ ServiceLB, shared NFS, local-path storage, or externally managed components.
 
 K3sDeploy can create the first manager, join more managers or workers, promote
 a worker, validate a cluster, repair safe local differences, and guide guarded
-embedded-etcd recovery. It installs one node at a time, so you stay in control
-of every machine and every destructive storage decision.
+embedded-etcd recovery. After the control plane is ready, it can also install
+the pinned Argo CD HA deployment GUI. It installs one node at a time, so you
+stay in control of every machine and every destructive storage decision.
 
 ## Start K3sDeploy
 
@@ -58,7 +59,7 @@ cd K3sDeploy
 For a production deployment, use the same reviewed release tag on every node:
 
 ```bash
-git clone --branch v1.0.0 --depth 1 https://github.com/cyberpoe-uk/K3sDeploy.git
+git clone --branch v1.1.0 --depth 1 https://github.com/cyberpoe-uk/K3sDeploy.git
 cd K3sDeploy
 ./k3s-bootstrap.sh
 ```
@@ -135,6 +136,7 @@ below.
 | Traefik | K3s packaged | HTTP and HTTPS ingress |
 | Longhorn | `v1.12.1` | Replicated persistent storage |
 | NFS CSI | `v4.13.4` | Optional advanced shared-NFS storage |
+| Argo CD | `v3.5.3` | Optional HA GitOps deployment GUI |
 
 The node-action menu provides:
 
@@ -147,7 +149,8 @@ The node-action menu provides:
 6. Repair safe local differences - asks before changes
 7. Recover lost embedded-etcd quorum - disaster recovery
 8. Restore an embedded-etcd snapshot - disaster recovery
-9. Exit
+9. Install or validate Argo CD - GitOps deployment GUI
+10. Exit
 ```
 
 Run option 1 only on the first manager. Run option 2 on the next two managers,
@@ -158,6 +161,24 @@ joining node.
 Every workflow shows a plan before making changes. Unavailable choices remain
 visible with an explanation, but cannot be selected. Storage devices are never
 chosen automatically, and formatting requires a separate exact confirmation.
+
+## Deploy services with Argo CD
+
+After three managers are Ready, K3sDeploy offers to install the pinned Argo CD
+HA profile. You can also run option 9 later from any healthy manager. The
+workflow installs Argo CD once for the cluster, waits for every HA workload,
+and exposes its HTTPS GUI through a private MetalLB address.
+
+K3sDeploy does not create a GitLab repository or store GitLab credentials. In
+the Argo CD GUI, connect your repository with a read-only deploy token or SSH
+deploy key, then create Applications that point to the service directories in
+Git. Argo CD continuously compares those definitions with the cluster and can
+automatically synchronize approved changes.
+
+The initial GUI uses Argo CD's own certificate, so a browser warning is
+expected on the first private-IP visit. Change the generated administrator
+password after signing in. Add private DNS and trusted TLS before exposing the
+GUI beyond the trusted management network.
 
 ## Storage and availability
 

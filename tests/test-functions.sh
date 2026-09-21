@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 source "$ROOT/lib/common.sh"
+source "$ROOT/config/versions.env"
 # shellcheck source=../lib/preflight.sh
 source "$ROOT/lib/preflight.sh"
 pass=0; fail=0
@@ -124,6 +125,19 @@ snapshot_safety_uses_privileged_resolution(){
   )
 }
 assert_ok snapshot_safety_uses_privileged_resolution
+# shellcheck source=../lib/argocd.sh
+source "$ROOT/lib/argocd.sh"
+assert_eq "$(argocd_manifest_url)" 'https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.3/manifests/ha/install.yaml'
+assert_ok workload_records_ready <<< $'Deployment|argocd-server|2|2\nStatefulSet|argocd-redis-ha-server|3|3'
+assert_bad workload_records_ready <<< $'Deployment|argocd-server|2|1\nStatefulSet|argocd-redis-ha-server|3|3'
+assert_bad workload_records_ready <<< ''
+assert_eq "$(manager_counts_from_records <<< $'k3s-1|True\nk3s-2|False\nk3s-3|True')" '2|3'
+ARGOCD_TEST_MUTATIONS=0
+kubectl_local(){ ((++ARGOCD_TEST_MUTATIONS)); }
+DRY_RUN=true
+install_argocd >/dev/null
+DRY_RUN=false
+assert_eq "$ARGOCD_TEST_MUTATIONS" 0
 VIRTUALIZATION_TYPE=none
 assert_bad virtual_machine_detected
 VIRTUALIZATION_TYPE=kvm
