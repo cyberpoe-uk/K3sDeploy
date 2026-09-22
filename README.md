@@ -4,6 +4,7 @@
   <img src="assets/k3sdeploy-clear.png" alt="K3sDeploy logo" width="500">
 </p>
 
+
 ## Build and recover a K3s cluster with guided choices
 
 K3sDeploy is an interactive installer for building and maintaining small to big highly available K3s clusters. It is designed for beginners who want clear explanations, visible safety checks and sensible defaults without having to memorize every Kubernetes command.
@@ -19,25 +20,18 @@ embedded-etcd recovery. After the control plane is ready, it can also install
 the pinned Argo CD HA deployment GUI. It installs one node at a time, so you
 stay in control of every machine and every destructive storage decision.
 
+
 ## How to Launch K3sDeploy - Recommended
 
-<p align="center">
-  <img src="assets/K3sdeploy-launch-screen.jpg" alt="K3sDeploy Launch Screen" width="300">
-</p>
-
-On each node, run:
+On your first node, run:
 
 ```bash
 bash <(curl -fsSL https://cyberpoe.uk/k3sdeploy-latest)
 ```
 
-The launcher finds and downloads the newest stable version tag to a temporary
-directory and then opens the interactive menu. If Git
-is missing, the user will get a quick explanation as in why Git is needed. The user is then asked if accepts to download and install Git.
+The launcher finds and downloads the newest stable version tag to a temporary directory and then opens the interactive menu. The temporary files are removed when K3sDeploy closes. If Git is missing, the user will be asked to accept the download and installation of Git.
 
-The temporary files are removed when K3sDeploy closes. Run the same command on
-the next node and select the appropriate join option:
-
+Run the same command on the next node and select the appropriate join option.
 
 
 ### Alternative: clone the repository
@@ -64,11 +58,47 @@ cd K3sDeploy
 Downloading only `k3s-bootstrap.sh` will not work because K3sDeploy is a
 multi-file project.
 
+
+## Installer choices
+
+K3sDeploy first asks whether you want the recommended or advanced profile. 
+
+<p align="center">
+  <img src="assets/k3sdeploy-launch-screen.jpg" alt="K3sDeploy launcher" width="500">
+</p>
+
+The recommended profile is the simplest supported path and uses the components
+below.
+
+| Component | Pinned version | Purpose |
+| --- | --- | --- |
+| K3s | `v1.36.4+k3s1` | Lightweight Kubernetes distribution |
+| kube-vip | `v1.2.3` | Highly available Kubernetes API VIP |
+| MetalLB | `v0.16.1` | Application `LoadBalancer` addresses |
+| Traefik | K3s packaged | HTTP and HTTPS ingress |
+| Longhorn | `v1.12.1` | Replicated persistent storage |
+| NFS CSI | `v4.13.4` | Optional advanced shared-NFS storage |
+| Argo CD | `v3.5.3` | Optional HA GitOps deployment GUI |
+
+The Recommended menu provides:
+
+<p align="center">
+  <img src="assets/k3sdeploy-options.jpg" alt="K3sDeploy options" width="500">
+</p>
+
+Run option 1 only on the first manager. Run option 2 on the next manager nodes,
+one at a time, using the same API VIP and server token. Run option 3 on each
+remaining worker. K3sDeploy verifies the endpoint and token before preparing a
+joining node.
+
+Every workflow shows a plan before making changes. Unavailable choices remain
+visible with an explanation, but cannot be selected. Storage devices are never
+chosen automatically, and formatting requires a separate exact confirmation.
+
 ## Prepare every node first
 
 Start every new cluster node from a fresh Ubuntu Server 24.04 LTS installation.
-Do not deploy onto a desktop, a general-purpose server, or a machine containing
-an old K3s installation or Longhorn data. K3sDeploy detects existing state and
+Do not deploy onto a machine containing an old K3s installation or Longhorn data. K3sDeploy detects existing state and
 blocks fresh create or join operations to protect it.
 
 After a node has joined the cluster, you can run K3sDeploy again on that node
@@ -118,46 +148,6 @@ node-05  worker
 
 A two-manager cluster cannot lose either manager. Complete the third healthy
 manager before treating the control plane as highly available.
-
-## Installer choices
-
-K3sDeploy first asks whether you want the recommended or advanced profile. The
-recommended profile is the simplest supported path and uses the components
-below.
-
-| Component | Pinned version | Purpose |
-| --- | --- | --- |
-| K3s | `v1.36.4+k3s1` | Lightweight Kubernetes distribution |
-| kube-vip | `v1.2.3` | Highly available Kubernetes API VIP |
-| MetalLB | `v0.16.1` | Application `LoadBalancer` addresses |
-| Traefik | K3s packaged | HTTP and HTTPS ingress |
-| Longhorn | `v1.12.1` | Replicated persistent storage |
-| NFS CSI | `v4.13.4` | Optional advanced shared-NFS storage |
-| Argo CD | `v3.5.3` | Optional HA GitOps deployment GUI |
-
-The node-action menu provides:
-
-```text
-1. Create new K3s cluster - first manager
-2. Join existing cluster - manager with control-plane + etcd
-3. Join existing cluster - worker
-4. Upgrade this worker to manager - control-plane + etcd
-5. Validate this node and cluster - read only
-6. Repair safe local differences - asks before changes
-7. Recover lost embedded-etcd quorum - disaster recovery
-8. Restore an embedded-etcd snapshot - disaster recovery
-9. Install or validate Argo CD - GitOps deployment GUI
-10. Exit
-```
-
-Run option 1 only on the first manager. Run option 2 on the next two managers,
-one at a time, using the same API VIP and server token. Run option 3 on each
-remaining worker. K3sDeploy verifies the endpoint and token before preparing a
-joining node.
-
-Every workflow shows a plan before making changes. Unavailable choices remain
-visible with an explanation, but cannot be selected. Storage devices are never
-chosen automatically, and formatting requires a separate exact confirmation.
 
 ## Deploy services with Argo CD
 
