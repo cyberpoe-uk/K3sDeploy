@@ -219,20 +219,18 @@ Successful workflows finish with a health report, a summary of what changed,
 recommended next steps, and the protected log location. If an input or system
 condition is recoverable, K3sDeploy explains it and returns to the menu.
 
-## Useful commands
+## Validation and troubleshooting
 
+Select option 5, **Validate this node and cluster**, to run read-only health
+checks. This is a good first step when an installation has failed, a node is
+not behaving as expected, or you want to verify the cluster after making
+changes.
 
-
-Start troubleshooting with option 5 and the newest log under:
+For additional troubleshooting details, review the newest log under:
 
 ```text
 /var/log/k3s-bootstrap/
 ```
-
-The optional Longhorn smoke test creates a temporary one-replica test volume,
-writes data, re-attaches it, verifies the data, and removes the test resources.
-It verifies basic provisioning and persistence, but does not prove multi-node
-availability or backup recovery.
 
 ## Known limitations
 
@@ -249,20 +247,6 @@ available yet. When MetalLB publishes one, I will validate it with K3sDeploy and
 update the pinned version. K3sDeploy does not use a floating `latest` version
 because an unreviewed dependency change could make installations inconsistent.
 
-## Development and testing
-
-The project pins component versions in `config/versions.env`. Review the
-[changelog](CHANGELOG.md) before upgrading and use the same K3sDeploy version on
-every node in one cluster.
-
-From the root of a cloned K3sDeploy repository, run the local checks with:
-
-```bash
-bash -n k3sdeploy-latest.sh k3s-bootstrap.sh lib/*.sh tests/*.sh
-bash tests/test-bootstrap.sh
-bash tests/test-functions.sh
-bash tests/test-interaction.sh
-```
 
 ## Development note
 
