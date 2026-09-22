@@ -1,15 +1,12 @@
 # K3sDeploy
 
 <p align="center">
-  <img src="assets/k3sdeploy-cover-clear.png" alt="K3sDeploy logo" width="500">
+  <img src="assets/k3sdeploy-clear.png" alt="K3sDeploy logo" width="500">
 </p>
 
 ## Build and recover a K3s cluster with guided choices
 
-K3sDeploy is an interactive installer for building and maintaining a small,
-highly available K3s cluster. It is designed for beginners who want clear
-explanations, visible safety checks, and sensible defaults without having to
-memorize every Kubernetes command.
+K3sDeploy is an interactive installer for building and maintaining small to big highly available K3s clusters. It is designed for beginners who want clear explanations, visible safety checks and sensible defaults without having to memorize every Kubernetes command.
 
 The recommended profile installs a highly available Kubernetes API with
 kube-vip, application addresses with MetalLB, ingress with Traefik, and
@@ -22,13 +19,11 @@ embedded-etcd recovery. After the control plane is ready, it can also install
 the pinned Argo CD HA deployment GUI. It installs one node at a time, so you
 stay in control of every machine and every destructive storage decision.
 
-## Start K3sDeploy
+## How to Launch K3sDeploy - Recommended
 
-Run K3sDeploy as your normal user. Do not put `sudo` before the command. The
-installer asks for your sudo password only when a system change needs
-administrator access.
-
-### Recommended: launch the latest stable release
+<p align="center">
+  <img src="assets/K3sdeploy-launch-screen.jpg" alt="K3sDeploy Launch Screen" width="300">
+</p>
 
 On each node, run:
 
@@ -36,12 +31,14 @@ On each node, run:
 bash <(curl -fsSL https://cyberpoe.uk/k3sdeploy-latest)
 ```
 
-The launcher finds the newest stable version tag, downloads it to a temporary
-directory, verifies the release version, and opens the interactive menu. If Git
-is missing, it explains why Git is needed and asks before installing it.
+The launcher finds and downloads the newest stable version tag to a temporary
+directory and then opens the interactive menu. If Git
+is missing, the user will get a quick explanation as in why Git is needed. The user is then asked if accepts to download and install Git.
 
 The temporary files are removed when K3sDeploy closes. Run the same command on
-the next node and select the appropriate join option.
+the next node and select the appropriate join option:
+
+
 
 ### Alternative: clone the repository
 
