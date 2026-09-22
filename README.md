@@ -1,7 +1,7 @@
 # K3sDeploy
 
 <p align="center">
-  <img src="assets/k3sdeploy-clear.png" alt="K3sDeploy logo" width="500">
+  <img src="assets/k3sdeploylogo.png" alt="K3sDeploy logo" width="500">
 </p>
 
 
@@ -40,17 +40,7 @@ Clone the repository if you want to inspect the complete project, keep a local
 copy, or run its tests:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y git curl
 git clone https://github.com/cyberpoe-uk/K3sDeploy.git
-cd K3sDeploy
-./k3s-bootstrap.sh
-```
-
-For a production deployment, use the same reviewed release tag on every node:
-
-```bash
-git clone --branch v1.1.0 --depth 1 https://github.com/cyberpoe-uk/K3sDeploy.git
 cd K3sDeploy
 ./k3s-bootstrap.sh
 ```
@@ -58,12 +48,17 @@ cd K3sDeploy
 Downloading only `k3s-bootstrap.sh` will not work because K3sDeploy is a
 multi-file project.
 
+When using a cloned copy of the repository, view the available command-line options with:
+
+```bash
+./k3s-bootstrap.sh --help
+```
 
 ## Installer choices
 
 K3sDeploy first asks whether you want the recommended or advanced profile. 
 
-<p align="center">
+<p align="left">
   <img src="assets/k3sdeploy-launch-screen.jpg" alt="K3sDeploy launcher" width="500">
 </p>
 
@@ -82,7 +77,7 @@ below.
 
 The Recommended menu provides:
 
-<p align="center">
+<p align="left">
   <img src="assets/k3sdeploy-options.jpg" alt="K3sDeploy options" width="500">
 </p>
 
@@ -95,10 +90,27 @@ Every workflow shows a plan before making changes. Unavailable choices remain
 visible with an explanation, but cannot be selected. Storage devices are never
 chosen automatically, and formatting requires a separate exact confirmation.
 
+## Recommended cluster layout
+
+Use three or five managers so embedded etcd has an odd number of voting
+members. Three managers is suitable for most small and medium clusters. Join
+the remaining machines as workers.
+
+```text
+node-01  manager + etcd + schedulable worker
+node-02  manager + etcd + schedulable worker
+node-03  manager + etcd + schedulable worker
+node-04  worker
+node-05  worker
+```
+
+A two-manager cluster cannot lose either manager. Complete the third healthy
+manager before treating the control plane as highly available.
+
 ## Prepare every node first
 
 Start every new cluster node from a fresh Ubuntu Server 24.04 LTS installation.
-Do not deploy onto a machine containing an old K3s installation or Longhorn data. K3sDeploy detects existing state and
+Do not deploy the installer onto a machine containing an old K3s installation or Longhorn data. K3sDeploy detects existing state and
 blocks fresh create or join operations to protect it.
 
 After a node has joined the cluster, you can run K3sDeploy again on that node
@@ -132,23 +144,6 @@ Allow required traffic between nodes, including TCP `6443`, TCP `2379-2380`,
 UDP `8472`, and TCP `10250`. Do not expose Flannel UDP `8472` to an untrusted
 network.
 
-## Recommended cluster layout
-
-Use three or five managers so embedded etcd has an odd number of voting
-members. Three managers is suitable for most small and medium clusters. Join
-the remaining machines as workers.
-
-```text
-node-01  manager + etcd + schedulable worker
-node-02  manager + etcd + schedulable worker
-node-03  manager + etcd + schedulable worker
-node-04  worker
-node-05  worker
-```
-
-A two-manager cluster cannot lose either manager. Complete the third healthy
-manager before treating the control plane as highly available.
-
 ## Deploy services with Argo CD
 
 After three managers are Ready, K3sDeploy offers to install the pinned Argo CD
@@ -179,7 +174,7 @@ while another uses a separate LVM volume. This does not affect etcd quorum.
 What matters is that each Longhorn node has a healthy, schedulable storage path
 with enough capacity.
 
-Local-path storage is available only through the advanced profile. It is not
+Local-path storage is available only through the `advanced` profile. It is not
 highly available and requires exact risk acceptance. A node or disk failure can
 make local-path data unavailable.
 
@@ -226,13 +221,7 @@ condition is recoverable, K3sDeploy explains it and returns to the menu.
 
 ## Useful commands
 
-```bash
-./k3s-bootstrap.sh --help
-./k3s-bootstrap.sh --version
-./k3s-bootstrap.sh --dry-run
-./k3s-bootstrap.sh --plain-menu
-./k3s-bootstrap.sh --no-color
-```
+
 
 Start troubleshooting with option 5 and the newest log under:
 
@@ -241,7 +230,7 @@ Start troubleshooting with option 5 and the newest log under:
 ```
 
 The optional Longhorn smoke test creates a temporary one-replica test volume,
-writes data, reattaches it, verifies the data, and removes the test resources.
+writes data, re-attaches it, verifies the data, and removes the test resources.
 It verifies basic provisioning and persistence, but does not prove multi-node
 availability or backup recovery.
 
@@ -266,7 +255,7 @@ The project pins component versions in `config/versions.env`. Review the
 [changelog](CHANGELOG.md) before upgrading and use the same K3sDeploy version on
 every node in one cluster.
 
-Run the local checks with:
+From the root of a cloned K3sDeploy repository, run the local checks with:
 
 ```bash
 bash -n k3sdeploy-latest.sh k3s-bootstrap.sh lib/*.sh tests/*.sh
